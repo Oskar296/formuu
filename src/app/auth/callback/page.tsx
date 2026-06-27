@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 
 export default function AuthCallbackPage() {
@@ -32,7 +33,7 @@ export default function AuthCallbackPage() {
     return (
       <div className="mx-auto max-w-sm px-6 py-20 text-center">
         <p className="text-sm text-red-600 mb-4">Sign in failed: {error}</p>
-        <a href="/" className="text-sm text-accent hover:underline">Go home</a>
+        <Link href="/" className="text-sm text-accent hover:underline">Go home</Link>
       </div>
     );
   }
