@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>THE EXAM — cheat together, don't get caught</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📝</text></svg>">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #191d26; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; color: #f0ede4; user-select: none; }
+  #c { position: fixed; inset: 0; display: block; }
+  button { font-family: inherit; cursor: pointer; }
+  .hidden { display: none !important; }
+
+  /* ---------- overlays ---------- */
+  .ov { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; background: rgba(14,16,24,.88); backdrop-filter: blur(5px); text-align: center; padding: 18px; }
+  .ov.hidden { display: none; }
+  h1 { font-size: clamp(34px, 6vw, 58px); font-weight: 900; letter-spacing: 3px; color: #f5f2e8;
+    text-shadow: 0 3px 0 #8a2f2f, 0 6px 22px rgba(0,0,0,.6); }
+  .tag { letter-spacing: 4px; font-size: 13px; opacity: .6; margin-top: 6px; }
+  .card { margin-top: 26px; background: #232837; border: 1px solid #3a4156; border-radius: 16px;
+    padding: 22px 26px; width: min(430px, 92vw); }
+  .card input[type=text] { width: 100%; padding: 11px 13px; border-radius: 10px; border: 1px solid #4a5270;
+    background: #171b26; color: #f0ede4; font-size: 16px; margin-bottom: 12px; text-align: center; }
+  .roleRow { display: flex; gap: 10px; margin-bottom: 12px; }
+  .roleRow button { flex: 1; padding: 11px; border-radius: 10px; border: 1px solid #4a5270;
+    background: #171b26; color: #cfd3e0; font-size: 14.5px; }
+  .roleRow button.sel { background: #3a4a7a; border-color: #7a8ac9; color: #fff; }
+  .bigBtn { width: 100%; padding: 13px; font-size: 16.5px; font-weight: 700; letter-spacing: 1px;
+    border: none; border-radius: 10px; background: linear-gradient(120deg, #e0b64e, #d68a3f); color: #241a08; margin-top: 4px; }
+  .bigBtn:disabled { filter: grayscale(.8); opacity: .5; cursor: default; }
+  .row2 { display: flex; gap: 10px; margin-top: 12px; }
+  .row2 input { flex: 1; margin-bottom: 0 !important; text-transform: uppercase; }
+  .row2 button { padding: 0 18px; border-radius: 10px; border: 1px solid #4a5270; background: #2c3247; color: #f0ede4; font-weight: 700; }
+  .note { font-size: 12px; opacity: .55; margin-top: 12px; line-height: 1.5; }
+
+  #roomCodeBig { font-size: 44px; font-weight: 900; letter-spacing: 12px; color: #e0b64e; margin: 8px 0 2px; }
+  #roster { margin: 14px 0; display: flex; flex-direction: column; gap: 6px; }
+  #roster div { background: #171b26; border-radius: 8px; padding: 8px 12px; font-size: 14.5px; display: flex; justify-content: space-between; }
+  #roster .r { opacity: .7; font-size: 12.5px; }
+  #lobbyHint { font-size: 12.5px; opacity: .6; margin-top: 6px; }
+
+  #staffroom .coffee { font-size: 70px; margin-bottom: 12px; }
+
+  #resultsRows { margin: 16px 0; display: flex; flex-direction: column; gap: 5px; width: min(420px, 90vw); }
+  #resultsRows div { display: flex; justify-content: space-between; background: #171b26; border-radius: 8px; padding: 8px 14px; font-size: 15px; }
+  #resultsRows .val { color: #e0b64e; font-weight: 800; }
+  #avgLine { font-size: 19px; margin-top: 6px; }
+
+  /* ---------- HUD ---------- */
+  .hud { position: fixed; z-index: 20; pointer-events: none; }
+  #topbar { top: 12px; left: 50%; transform: translateX(-50%); text-align: center;
+    background: rgba(16,18,28,.72); border-radius: 12px; padding: 7px 22px; }
+  #phaseLabel { font-size: 11.5px; letter-spacing: 3px; opacity: .7; }
+  #phaseTimer { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+  #banner { top: 22%; left: 50%; transform: translateX(-50%); font-size: clamp(22px, 4vw, 40px); font-weight: 900;
+    letter-spacing: 2px; color: #ffd76a; text-shadow: 0 3px 16px rgba(0,0,0,.8); opacity: 0; transition: opacity .3s; text-align: center; }
+
+  #toasts { bottom: 130px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column-reverse;
+    gap: 6px; align-items: center; }
+  .toast { background: rgba(20,24,36,.92); border: 1px solid #3a4156; border-radius: 10px; padding: 8px 16px;
+    font-size: 14px; animation: tIn .25s ease-out; max-width: 80vw; }
+  .toast.gold { border-color: #e0b64e; color: #ffd76a; }
+  .toast.red { border-color: #c05050; color: #ff9a9a; }
+  @keyframes tIn { from { opacity: 0; transform: translateY(10px); } }
+
+  /* student sheet */
+  #sheetPanel { top: 70px; right: 12px; width: 315px; max-height: calc(100vh - 220px); overflow-y: auto;
+    background: #f2eddc; color: #2a2418; border-radius: 10px; padding: 13px 14px; pointer-events: auto;
+    box-shadow: 0 8px 30px rgba(0,0,0,.5); font-size: 13.5px; }
+  #sheetPanel h3 { font-size: 14px; letter-spacing: 1px; margin-bottom: 8px; color: #6a1f1f; }
+  .q { padding: 7px 8px; border-radius: 8px; margin-bottom: 4px; cursor: pointer; border: 2px solid transparent; }
+  .q.sel { border-color: #b98a2e; background: #ece2c2; }
+  .q .qt { font-weight: 600; line-height: 1.35; }
+  .q .opts { display: flex; gap: 5px; margin-top: 6px; }
+  .q .opts button { flex: 1; padding: 4px 0; border-radius: 6px; border: 1px solid #b9ac8a; background: #faf6ea;
+    font-size: 12.5px; font-weight: 700; color: #4a3f28; }
+  .q .opts button.pick { background: #3a5a9a; border-color: #3a5a9a; color: #fff; }
+  .q .opts button.known { outline: 2px solid #4e9a5e; }
+  .q.studied .qt::after { content: ' 📖'; }
+
+  /* action bar */
+  #actionBar { bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; flex-wrap: wrap;
+    justify-content: center; pointer-events: auto; max-width: 96vw; }
+  #actionBar button { background: rgba(24,28,42,.9); border: 1px solid #3a4156; color: #dfe3f0; border-radius: 9px;
+    padding: 7px 10px; font-size: 12px; line-height: 1.3; min-width: 74px; }
+  #actionBar button b { display: block; font-size: 14px; color: #ffd76a; }
+  #actionBar button:disabled { opacity: .35; cursor: default; }
+  #actionBar button.busy { border-color: #e0b64e; }
+
+  /* teacher HUD */
+  #teachBar { top: 70px; left: 12px; width: 230px; background: rgba(16,18,28,.78); border-radius: 12px;
+    padding: 12px 14px; font-size: 13px; }
+  .meter { height: 10px; border-radius: 6px; background: #12141e; margin: 4px 0 10px; overflow: hidden; }
+  .meter i { display: block; height: 100%; border-radius: 6px; transition: width .3s; }
+  #authFill { background: linear-gradient(90deg, #c05050, #e0b64e); }
+  #inspFill { background: linear-gradient(90deg, #4e86c7, #5da85e); }
+  #dutyLabel { color: #ffd76a; font-weight: 700; min-height: 18px; }
+  #cdLabel { opacity: .8; margin-top: 6px; }
+  #strikesHud { margin-top: 8px; font-size: 12px; opacity: .85; line-height: 1.6; }
+
+  #crosshair { top: 50%; left: 50%; transform: translate(-50%,-50%); width: 6px; height: 6px; border-radius: 50%;
+    background: #fff; box-shadow: 0 0 8px rgba(0,0,0,.8); }
+  #inspectHint { top: 70px; left: 50%; transform: translateX(-50%); background: rgba(16,18,28,.8);
+    padding: 8px 18px; border-radius: 10px; font-size: 14px; color: #ffd76a; }
+
+  /* prep panel */
+  #prepPanel { top: 70px; left: 50%; transform: translateX(-50%); width: min(560px, 94vw);
+    background: #232837; border: 1px solid #3a4156; border-radius: 14px; padding: 18px 20px; pointer-events: auto; }
+  #prepPanel h3 { color: #ffd76a; letter-spacing: 1px; margin-bottom: 8px; font-size: 16px; }
+  #studied { margin: 8px 0 14px; display: flex; flex-direction: column; gap: 6px; }
+  #studied div { background: #171b26; padding: 8px 12px; border-radius: 8px; font-size: 13.5px; }
+  #studied b { color: #8fe39e; }
+  .carriers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .carriers button { padding: 10px; border-radius: 10px; border: 1px solid #4a5270; background: #171b26;
+    color: #cfd3e0; font-size: 13px; line-height: 1.4; }
+  .carriers button.sel { background: #2e4a38; border-color: #5da85e; color: #fff; }
+  .carriers button:disabled { opacity: .4; }
+  #giftWho { width: 100%; margin-top: 8px; padding: 9px; border-radius: 8px; background: #171b26;
+    color: #f0ede4; border: 1px solid #4a5270; display: none; }
+  #prepHint { font-size: 12px; opacity: .6; margin-top: 10px; }
+
+  #riotFlash { position: fixed; inset: 0; z-index: 15; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(255,120,40,.35) 100%); transition: opacity .4s; }
+  #vig { position: fixed; inset: 0; z-index: 5; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 60%, rgba(5,6,12,.5) 100%); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="vig"></div>
+<div id="riotFlash"></div>
+
+<!-- HUD -->
+<div class="hud" id="topbar"><div id="phaseLabel">—</div><div id="phaseTimer">0:00</div></div>
+<div class="hud" id="banner"></div>
+<div class="hud" id="toasts"></div>
+<div class="hud hidden" id="sheetPanel"></div>
+<div class="hud hidden" id="actionBar"></div>
+<div class="hud hidden" id="teachBar">
+  <div>AUTHORITY</div><div class="meter"><i id="authFill" style="width:100%"></i></div>
+  <div>INSPECTION RATING</div><div class="meter"><i id="inspFill" style="width:100%"></i></div>
+  <div id="dutyLabel"></div>
+  <div id="cdLabel"></div>
+  <div id="strikesHud"></div>
+</div>
+<div class="hud hidden" id="crosshair"></div>
+<div class="hud hidden" id="inspectHint"></div>
+<div class="hud hidden" id="prepPanel">
+  <h3>📚 LAST NIGHT YOU STUDIED…</h3>
+  <div id="studied"></div>
+  <h3>🎒 PLAN YOUR CHEATS (pick up to 2 carriers)</h3>
+  <div class="carriers">
+    <button id="cArm"><b>✍️ Ink your arm</b><br>Fast to read · risky if caught</button>
+    <button id="cBottle"><b>🍼 Bottle label</b><br>Reading looks like drinking</button>
+    <button id="cStash"><b>🗄 Stash under desk</b><br>Slow to read · can be inspected</button>
+    <button id="cGift"><b>🎁 Gift stash to classmate</b><br>Plant answers under their desk</button>
+  </div>
+  <select id="giftWho"></select>
+  <div id="prepHint">The teacher will inspect 3 desks before the exam. Choose wisely.</div>
+</div>
+
+<!-- overlays -->
+<div class="ov" id="menu">
+  <h1>📝 THE EXAM</h1>
+  <div class="tag">CHEAT TOGETHER · DON'T GET CAUGHT</div>
+  <div class="card">
+    <input type="text" id="nameInput" maxlength="14" placeholder="your name">
+    <div class="roleRow">
+      <button id="roleStudent" class="sel">🙋 Student</button>
+      <button id="roleTeacher">🧑‍🏫 Teacher</button>
+    </div>
+    <button class="bigBtn" id="btnCreate">CREATE CLASSROOM</button>
+    <div class="row2">
+      <input type="text" id="codeInput" maxlength="4" placeholder="CODE">
+      <button id="btnJoin">JOIN</button>
+    </div>
+    <div class="note" id="netNote"></div>
+  </div>
+</div>
+
+<div class="ov hidden" id="lobby">
+  <div class="tag">CLASSROOM CODE</div>
+  <div id="roomCodeBig">----</div>
+  <div class="card">
+    <div id="roster"></div>
+    <button class="bigBtn" id="btnStart" disabled>START THE EXAM</button>
+    <div id="lobbyHint"></div>
+  </div>
+</div>
+
+<div class="ov hidden" id="staffroom">
+  <div class="coffee">☕</div>
+  <h1 style="font-size:30px">STAFF ROOM</h1>
+  <div class="note" style="max-width:420px">The students are "studying". You return for a desk inspection before the exam begins. Choose your 3 inspections wisely.</div>
+</div>
+
+<div class="ov hidden" id="resultsOv">
+  <h1 id="resultsTitle">RESULTS</h1>
+  <div id="avgLine"></div>
+  <div id="resultsRows"></div>
+  <button class="bigBtn" style="width:min(420px,90vw)" id="btnAgain">BACK TO LOBBY</button>
+</div>
+
+<script src="./vendor/supabase.umd.js"></script>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
