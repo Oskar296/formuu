@@ -26,11 +26,13 @@ const mat = (c, o = {}) => {
   return mats.get(k);
 };
 
+let SURFACES = [];
 function box(scene, w, h, d, c, x, y, z, opts = {}) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), opts.material || mat(c));
   m.position.set(x, y, z);
   m.castShadow = !opts.noShadow; m.receiveShadow = true;
   scene.add(m);
+  SURFACES.push(m); // anything built is a valid place to stick a note
   return m;
 }
 
@@ -53,10 +55,11 @@ function textSprite(text, { size = 42, w = 512, h = 128, bg = null, fg = '#fff' 
 }
 
 export function buildRoom(scene) {
+  SURFACES = [];
   scene.background = new THREE.Color('#20242e');
   scene.add(new THREE.HemisphereLight('#e8ecff', '#4a4238', 1.0));
   scene.add(new THREE.AmbientLight('#b8b2c4', 0.45));
-  const sun = new THREE.DirectionalLight('#ffeecc', 1.4);
+  const sun = new THREE.DirectionalLight('#ffe9c4', 1.6);
   sun.position.set(14, 12, 2);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -65,8 +68,7 @@ export function buildRoom(scene) {
   scene.add(sun);
 
   // floor / ceiling / walls
-  const floor = box(scene, ROOM.x * 2, 0.2, ROOM.z * 2, '#9a7a52', 0, -0.1, 0, { noShadow: true });
-  floor.material = mat('#9a7a52');
+  box(scene, ROOM.x * 2, 0.2, ROOM.z * 2, '#9a7a52', 0, -0.1, 0, { noShadow: true });
   box(scene, ROOM.x * 2, 0.2, ROOM.z * 2, '#ded9cc', 0, 4.4, 0, { noShadow: true });
   box(scene, ROOM.x * 2, 4.4, 0.3, '#cfe3d2', 0, 2.2, -ROOM.z, { noShadow: true }); // board wall
   box(scene, ROOM.x * 2, 4.4, 0.3, '#e3decf', 0, 2.2, ROOM.z, { noShadow: true });
@@ -108,12 +110,29 @@ export function buildRoom(scene) {
     box(scene, 1.0, 0.08, 0.9, '#8a6a44', d.x, 0.5, d.z + 1.05);            // chair seat
     box(scene, 1.0, 0.9, 0.08, '#8a6a44', d.x, 0.95, d.z + 1.48);           // chair back
     box(scene, 0.62, 0.02, 0.85, '#f2efe4', d.x - 0.2, 0.83, d.z, { noShadow: true }); // paper
-    const bottle = box(scene, 0.14, 0.4, 0.14, '#5db0d6', d.x + 0.55, 1.02, d.z - 0.25);
-    bottle.userData.bottleSeat = i;
+    box(scene, 0.14, 0.4, 0.14, '#5db0d6', d.x + 0.55, 1.02, d.z - 0.25);   // bottle
     deskMeshes.push(top);
   });
 
-  return { deskMeshes, phone };
+  return { deskMeshes, phone, surfaces: SURFACES.slice() };
+}
+
+// a written note stuck onto any surface, showing the author's actual drawing
+export function makeNoteMesh(scene, img, pos, normal) {
+  const tex = new THREE.Texture();
+  const image = new Image();
+  image.onload = () => { tex.image = image; tex.needsUpdate = true; };
+  image.src = img;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.26, 0.185),
+    new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }));
+  const p = new THREE.Vector3(...pos), n = new THREE.Vector3(...normal).normalize();
+  m.position.copy(p).addScaledVector(n, 0.012);
+  m.lookAt(p.clone().add(n));
+  m.rotateZ((Math.random() - 0.5) * 0.5);
+  scene.add(m);
+  return m;
 }
 
 // ---- avatars ------------------------------------------------------------
@@ -135,6 +154,8 @@ export function makeStudent(scene, seat, colorIdx, name) {
   return {
     group: g, head, body, seat,
     setLean(l) { g.position.x = d.x + l * 0.55; g.rotation.z = -l * 0.18; },
+    setPos(x, z, yaw) { g.position.x = x; g.position.z = z; g.rotation.y = yaw; g.rotation.z = 0; },
+    resetSeat() { g.position.set(d.x, 0, d.z + 0.95); g.rotation.set(0, 0, 0); },
     setGesture(text, dur, now, bg = 'rgba(30,60,140,0.85)') {
       if (gesture.sprite) g.remove(gesture.sprite);
       gesture.sprite = textSprite(text, { size: 52, bg });
@@ -148,6 +169,7 @@ export function makeStudent(scene, seat, colorIdx, name) {
     moveToStool() {
       g.position.set(STOOL.x, 0, STOOL.z + 0.1);
       g.rotation.y = Math.PI * 0.15;
+      g.rotation.z = 0;
     },
     setVisible(v) { g.visible = v; },
   };
