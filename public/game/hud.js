@@ -67,6 +67,40 @@ export function busy(frac) {
 
 export function helpVisible(v) { show('helpBtn', v); if (!v) show('helpCard', false); }
 
+// prep-phase trap kit (one per student)
+const TRAY = [
+  { kind: 'marbles', icon: '🔮', label: 'marbles' },
+  { kind: 'glue', icon: '🍯', label: 'glue' },
+  { kind: 'pepper', icon: '🌶', label: 'pepper eraser' },
+  { kind: 'clock', icon: '⏰', label: 'alarm clock' },
+];
+let trayBuilt = false;
+export function trapTray(visible, used) {
+  const el = $('trapTray');
+  if (!trayBuilt) {
+    trayBuilt = true;
+    for (const t of TRAY) {
+      const b = document.createElement('button');
+      b.innerHTML = `${t.icon}<small>${t.label}</small>`;
+      b.onclick = () => CB.onTrap(t.kind);
+      el.appendChild(b);
+    }
+  }
+  show('trapTray', visible);
+  el.classList.toggle('used', !!used);
+  $('trayTitle').textContent = used ? 'TRAP PLANTED ✓' : 'PICK ONE TRAP';
+}
+
+export function blind(secs) {
+  const el = $('blind');
+  el.style.transition = 'none';
+  el.style.opacity = 1;
+  requestAnimationFrame(() => {
+    el.style.transition = `opacity ${secs}s ease-in`;
+    el.style.opacity = 0;
+  });
+}
+
 export function showMenu(netLabel) {
   show('menu', true); show('lobby', false); show('resultsOv', false); show('staffroom', false);
   $('netNote').textContent = netLabel;

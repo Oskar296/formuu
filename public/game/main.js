@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { buildRoom, makeStudent, makeTeacher, flyNote, tickFlights, makeNoteMesh,
+import { buildRoom, makeStudent, makeTeacher, flyNote, tickFlights, makeNoteMesh, makeTrapMesh,
   DESKS, seatAdjacent, BOARD_ZONE, TEACHER_DESK, ROOM } from './scene.js';
 import { generateExam, dealKnowledge, score, N_QUESTIONS } from './exam.js';
 import { makeNet, onlineAvailable } from './net.js';
@@ -35,6 +35,14 @@ const HIDDEN_ACTS = { // triggered by clicks / scribbler, not the bar
   readNote: { dur: 2, real: true },
 };
 const ACT = Object.fromEntries([...ACTIONS.map(a => [a.type, a]), ...Object.entries(HIDDEN_ACTS)]);
+// one trap per student, planted during prep
+const TRAPS = {
+  marbles: { icon: '🔮', name: 'marbles', how: 'floor' },
+  glue: { icon: '🍯', name: 'glue puddle', how: 'floor' },
+  pepper: { icon: '🌶', name: 'pepper eraser', how: 'auto' },
+  clock: { icon: '⏰', name: 'alarm clock', how: 'stick' },
+};
+
 const GESTURE = {
   fingers: m => '✋ ' + '☝️'.repeat(m.n), tap: () => '👇 tap', cough: () => '😷 KHM!',
   peek: () => '👀 leans over', flash: () => '📄 flashes sheet', throw: () => '🗒 yeet!',
@@ -76,6 +84,8 @@ const S = {
   duty: null, dutyProgress: 0, nextDutyAt: 0, riotUntil: 0,
   actionLog: [], raised: [], pendingFx: [],
   notes: new Map(),          // id -> {id, owner, img, mesh, pos}
+  traps: new Map(),          // id -> {id, kind, owner, pos, mesh, armed, ringing, ringAt}
+  myTrapPlaced: false, stunUntil: 0, stuckUntil: 0, ringInt: 0,
   attach: {},                // pid -> {arm: img, bottle: img}
   attachMeshes: {},          // pid -> {arm: mesh, bottle: mesh}
   busyUntil: 0, busyType: null, aim: null, lastTapAt: 0,
@@ -120,6 +130,10 @@ const sounds = (() => {
     riot() { tone(190, 0.9, 'sawtooth', 0.25, 1.6); },
     win() { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.3, 'triangle', 0.18, 1, i * 0.13)); },
     lose() { [400, 340, 260].forEach((f, i) => tone(f, 0.4, 'triangle', 0.18, 0.85, i * 0.2)); },
+    crash() { [180, 320, 240, 400].forEach((f, i) => tone(f, 0.14, 'square', 0.14, 0.7, i * 0.06)); },
+    squelch() { tone(120, 0.5, 'sine', 0.2, 0.4); },
+    sneeze() { tone(900, 0.12, 'sawtooth', 0.14, 0.3); tone(240, 0.35, 'triangle', 0.2, 0.5, 0.1); },
+    ring() { tone(1560, 0.16, 'square', 0.1, 1); tone(1180, 0.16, 'square', 0.1, 1, 0.18); },
   };
 })();
 
@@ -194,7 +208,13 @@ function hostPhase(phase) {
     for (const pid in deal) know[pid] = deal[pid].map(k => ({ q: k.q, a: exam[k.q].correct }));
     S.net.send('deal', { knowledge: know });
   }
-  if (phase === 'exam') S.nextDutyAt = now() + (12 + Math.random() * 10) / TSCALE;
+  if (phase === 'exam') {
+    S.nextDutyAt = now() + (12 + Math.random() * 10) / TSCALE;
+    for (const tr of S.traps.values()) {
+      if (tr.kind === 'clock' && tr.armed)
+        tr.ringAt = now() + (0.25 + Math.random() * 0.45) * DUR.exam / TSCALE;
+    }
+  }
 }
 
 function hostTick() {
@@ -227,7 +247,23 @@ function hostTick() {
   if (S.riotUntil && t > S.riotUntil && S.authority <= 0) {
     S.net.send('meters', { authority: 50, inspection: S.inspection });
   }
+  // traps vs the teacher
+  const tp = S.poses[S.teacherId];
+  for (const tr of S.traps.values()) {
+    if (!tr.armed) {
+      if (tr.ringing && t > tr.ringing) S.net.send('trapGone', { id: tr.id }); // rang itself out
+      continue;
+    }
+    if ((tr.kind === 'marbles' || tr.kind === 'glue') && tp &&
+        Math.hypot(tp.x - tr.pos[0], tp.z - tr.pos[2]) < 0.75) {
+      S.net.send('trapFire', { id: tr.id });
+    } else if (tr.kind === 'clock' && tr.ringAt && t >= tr.ringAt) {
+      S.net.send('trapFire', { id: tr.id });
+    }
+  }
 }
+
+const anyClockRinging = () => [...S.traps.values()].some(tr => tr.ringing);
 
 function hostResults(reason) {
   if (S.resultsSent) return;
@@ -249,6 +285,7 @@ function hostResults(reason) {
 
 // tap/cough are innocent one-offs; a BURST (3+ in 4s) is an accusable pattern
 function entryIsReal(e) {
+  if (e.real === 'burst' && anyClockRinging()) return false; // the ringing masks the noise
   if (e.real !== 'burst') return !!e.real;
   const n = S.actionLog.filter(x => x.pid === e.pid && x.type === e.type &&
     x.t0 > e.t1 - 4 && x.t0 <= e.t1).length;
@@ -306,6 +343,10 @@ function onEvent(ev) {
       S.attach = {}; S.aim = null;
       for (const n of S.notes.values()) scene.remove(n.mesh);
       S.notes.clear();
+      for (const tr of S.traps.values()) scene.remove(tr.mesh);
+      S.traps.clear();
+      stopRing();
+      S.myTrapPlaced = false; S.stunUntil = 0; S.stuckUntil = 0;
       for (const pid in S.attachMeshes)
         for (const k in S.attachMeshes[pid]) S.attachMeshes[pid][k].parent?.remove(S.attachMeshes[pid][k]);
       S.attachMeshes = {};
@@ -338,6 +379,58 @@ function onEvent(ev) {
       S.attach[from][data.slot] = data.img;
       attachVisual(from, data.slot, data.img);
       if (from === S.myId) hud.toast(data.slot === 'arm' ? '💪 Ink dried on your arm' : '🍼 Bottle label applied');
+      break;
+    }
+    case 'trap': {
+      const mesh = makeTrapMesh(scene, data.kind, data.pos, data.n);
+      S.traps.set(data.id, { id: data.id, kind: data.kind, owner: from, pos: data.pos, mesh, armed: true });
+      if (from === S.myId) {
+        S.myTrapPlaced = true;
+        hud.trapTray(S.phase === 'prep', true);
+        hud.toast(`${TRAPS[data.kind].icon} ${TRAPS[data.kind].name} planted`);
+      }
+      break;
+    }
+    case 'trapFire': {
+      const tr = S.traps.get(data.id);
+      if (!tr || !tr.armed) break;
+      tr.armed = false;
+      const t = now();
+      const oName = nameOf(tr.owner);
+      if (tr.kind === 'marbles') {
+        sounds.crash();
+        scene.remove(tr.mesh); S.traps.delete(tr.id);
+        if (isTeacher()) { S.stunUntil = t + 2.2; hud.banner('💫 MARBLES! WHO PUT MARBLES THERE?!', 2400); }
+        else hud.banner(`💫 The teacher slipped on ${oName}'s marbles!`, 2400);
+        if (S.teacherAv) S.teacherAv.setGesture('💫🌀', 2.2, t);
+      } else if (tr.kind === 'glue') {
+        sounds.squelch();
+        scene.remove(tr.mesh); S.traps.delete(tr.id);
+        if (isTeacher()) { S.stuckUntil = t + 2.6; hud.banner('🍯 YOUR SHOES ARE GLUED DOWN', 2600); }
+        else hud.banner(`🍯 The teacher stepped in ${oName}'s glue!`, 2400);
+        if (S.teacherAv) S.teacherAv.setGesture('🍯😾', 2.6, t);
+      } else if (tr.kind === 'pepper') {
+        sounds.sneeze();
+        scene.remove(tr.mesh); S.traps.delete(tr.id);
+        if (isTeacher()) { hud.blind(3); hud.banner('🤧 PEPPER ON THE ERASER!', 2600); }
+        else hud.banner(`🤧 ${oName}'s pepper eraser goes off — the teacher can't see!`, 2600);
+        if (S.teacherAv) S.teacherAv.setGesture('🤧💥', 3, t);
+      } else if (tr.kind === 'clock') {
+        if (S.net.isHost()) tr.ringing = t + 12; // rings itself out if not found
+        else tr.ringing = t + 999;
+        startRing();
+        if (isTeacher()) hud.banner('⏰ WHERE IS THAT RINGING?! Find it and click it!', 3000);
+        else hud.banner('⏰ COVER NOISE — taps can\'t be pinned on anyone!', 3000);
+      }
+      break;
+    }
+    case 'trapGone': {
+      const tr = S.traps.get(data.id);
+      if (!tr) break;
+      scene.remove(tr.mesh);
+      S.traps.delete(tr.id);
+      if (![...S.traps.values()].some(x => x.ringing)) stopRing();
+      if (data.disarmed) hud.toast(`🕵️ The teacher ${tr.kind === 'clock' && !tr.armed ? 'silenced' : 'disarmed'} ${nameOf(tr.owner)}'s ${TRAPS[tr.kind].name}!`, 'red');
       break;
     }
     case 'confiscate': {
@@ -496,6 +589,8 @@ function setPhase(phase, endsAt) {
   hud.closeScribbler(); hud.wheel(false); hud.hoverTip(null);
   hud.helpVisible(!isTeacher() && (phase === 'prep' || phase === 'exam'));
   sounds.bell();
+  hud.trapTray(false, S.myTrapPlaced);
+  if (S.teacherAv) S.teacherAv.group.visible = !isTeacher() && phase !== 'prep'; // he's in the staff room
   if (phase === 'prep') {
     hud.setPhase('STUDY PERIOD — RIG THE ROOM');
     if (isTeacher()) hud.staffroom(true);
@@ -503,6 +598,7 @@ function setPhase(phase, endsAt) {
       hud.prepPanel(true);
       hud.fillStudied(S.knowledge[S.myId] || [], S.exam);
       hud.noteCount(0);
+      hud.trapTray(true, S.myTrapPlaced);
     }
   } else if (phase === 'inspect') {
     hud.setPhase('INSPECTION — LOOK BUSY');
@@ -587,6 +683,37 @@ function openScrib() {
 function stickNoteAt(pos, normal) {
   const id = S.myId + ':' + (S.noteSeq++);
   S.net.send('stick', { id, pos, n: normal, img: S.aim.img });
+  S.aim = null;
+}
+
+// ---------------------------------------------------------------- traps
+
+function startRing() {
+  if (S.ringInt) return;
+  sounds.ring();
+  S.ringInt = setInterval(() => sounds.ring(), 600);
+}
+function stopRing() {
+  if (S.ringInt) { clearInterval(S.ringInt); S.ringInt = 0; }
+}
+
+function chooseTrap(kind) {
+  if (isTeacher() || S.phase !== 'prep' || S.myTrapPlaced) return;
+  const t = TRAPS[kind];
+  if (t.how === 'auto') { // pepper goes straight onto the chalk tray
+    placeTrap(kind, [-1.6, 1.19, -7.62], null);
+  } else if (t.how === 'floor') {
+    S.aim = { mode: 'trapFloor', kind };
+    hud.toast(`${t.icon} Click a spot on the FLOOR to lay the ${t.name}`);
+  } else {
+    S.aim = { mode: 'trapStick', kind };
+    hud.toast(`${t.icon} Click any surface to hide the ${t.name}`);
+  }
+}
+
+function placeTrap(kind, pos, n) {
+  const id = 'trap:' + S.myId + ':' + (S.noteSeq++);
+  S.net.send('trap', { id, kind, pos, n });
   S.aim = null;
 }
 
@@ -686,7 +813,17 @@ function setRay(e) {
 // One classifier for everything under the cursor — drives hover labels AND clicks.
 function probe() {
   const noteHit = raycaster.intersectObjects([...S.notes.values()].map(n => n.mesh))[0];
+  const trapHit = raycaster.intersectObjects([...S.traps.values()].map(t => t.mesh), true)[0];
+  const trapOf = hit => [...S.traps.values()].find(t => t.mesh === hit.object || t.mesh.children.includes(hit.object));
   if (isTeacher()) {
+    if (trapHit && ['inspect', 'exam'].includes(S.phase)) {
+      const trap = trapOf(trapHit);
+      if (trap) {
+        return trapHit.distance < CONFISCATE_RANGE
+          ? { kind: 'disarm', label: trap.ringing ? '⏰ SILENCE IT' : '🕵️ disarm the ' + TRAPS[trap.kind].name, trap }
+          : { kind: 'far', label: 'something\'s off there…' };
+      }
+    }
     if (noteHit && ['inspect', 'exam'].includes(S.phase)) {
       const note = [...S.notes.values()].find(n => n.mesh === noteHit.object);
       return noteHit.distance < CONFISCATE_RANGE
@@ -738,6 +875,18 @@ function handleClick(e) {
   setRay(e);
 
   // aimed placements first
+  if (!isTeacher() && S.aim && (S.aim.mode === 'trapFloor' || S.aim.mode === 'trapStick') && S.phase === 'prep') {
+    const hit = raycaster.intersectObjects(surfaces)[0];
+    if (!hit || hit.distance > STICK_RANGE + 1) { hud.toast('Too far — get closer', 'red'); return; }
+    if (S.aim.mode === 'trapFloor') {
+      if (hit.point.y > 0.35) { hud.toast('That one goes on the floor', 'red'); return; }
+      placeTrap(S.aim.kind, [hit.point.x, 0, hit.point.z], null);
+    } else {
+      const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+      placeTrap(S.aim.kind, hit.point.toArray(), n.toArray());
+    }
+    return;
+  }
   if (!isTeacher() && S.aim && S.aim.mode === 'stick' && S.phase === 'prep') {
     const hit = raycaster.intersectObjects(surfaces)[0];
     if (hit && hit.distance < STICK_RANGE) {
@@ -756,6 +905,7 @@ function handleClick(e) {
   if (!p) return;
   switch (p.kind) {
     case 'confiscate': S.net.send('confiscate', { id: p.note.id }); break;
+    case 'disarm': S.net.send('trapGone', { id: p.trap.id, disarmed: true }); break;
     case 'accuse':
       S.accuseReadyAt = now() + ACCUSE_CD;
       S.net.send('accuse', { target: p.pid });
@@ -815,8 +965,14 @@ function updateCamera(dt) {
     return;
   }
   if (isTeacher()) {
-    walkStep(S.tPos, dt, 3.4);
+    const t = now();
+    if (t > S.stunUntil && t > S.stuckUntil) walkStep(S.tPos, dt, 3.4);
     camera.position.set(S.tPos.x, 1.72, S.tPos.z);
+    if (t < S.stunUntil) { // marble tumble
+      const rem = S.stunUntil - t;
+      camera.rotation.z = Math.sin(t * 22) * 0.28 * (rem / 2.2);
+      camera.position.y = 1.72 - (1 - rem / 2.2) * 0.5 * Math.min(1, rem * 3);
+    }
   } else if (S.phase === 'prep') {
     walkStep(S.walk, dt, 3.2);
     camera.position.set(S.walk.x, 1.5, S.walk.z);
@@ -845,6 +1001,10 @@ function dutyTick(dt) {
   const inZone = Math.hypot(S.tPos.x - zone.x, S.tPos.z - zone.z) < zone.r;
   const secsLeft = Math.max(0, (S.duty.deadline - Date.now()) / 1000);
   if (inZone && S.keys.KeyE) {
+    if (S.dutyProgress === 0 && S.duty.kind === 'board') {
+      const pepper = [...S.traps.values()].find(tr => tr.armed && tr.kind === 'pepper');
+      if (pepper) S.net.send('trapFire', { id: pepper.id });
+    }
     S.dutyProgress += dt;
     hud.duty(`${S.duty.kind === 'board' ? '🖊 Writing' : '📞 On the phone'}… ${Math.round(S.dutyProgress / 4 * 100)}%`);
     if (S.dutyProgress >= 4) { S.net.send('dutyDone', { kind: S.duty.kind }); hud.duty(''); }
@@ -878,6 +1038,7 @@ hud.init({
   onAgain: () => { S.phase = 'lobby'; S.resultsSent = false; hud.hideOverlays(); refreshLobby(); },
   onAnswer: (q, oi) => { if (S.phase === 'exam' && !S.expelled[S.myId]) setMyAnswer(q, oi); },
   onWheel: (t, n) => tryAction(t, n),
+  onTrap: kind => chooseTrap(kind),
 });
 hud.showMenu(netLabel(P.get('net') || (onlineAvailable() ? 'online' : 'bc')));
 
@@ -962,9 +1123,13 @@ window.__game = {
       authority: S.authority, inspection: S.inspection, isHost: S.net ? S.net.isHost() : false,
       knowledge: S.knowledge[S.myId] || [],
       notes: [...S.notes.values()].map(n => ({ id: n.id, owner: n.owner, pos: n.pos })),
+      traps: [...S.traps.values()].map(t => ({ id: t.id, kind: t.kind, owner: t.owner, armed: t.armed, ringing: !!t.ringing })),
       attach: Object.keys(S.attach[S.myId] || {}),
+      stunned: now() < S.stunUntil, stuck: now() < S.stuckUntil,
     };
   },
+  placeTrap: (kind, pos, n) => placeTrap(kind, pos, n),
+  disarm: id => S.net.send('trapGone', { id, disarmed: true }),
   start: () => hostStart(),
   scribble: text => hud.scribbleTestImage(text),
   stickAt: (text, pos, n) => { S.aim = { mode: 'stick', img: hud.scribbleTestImage(text) }; stickNoteAt(pos, n); },
