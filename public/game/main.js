@@ -148,8 +148,11 @@ async function join(create, name, role, code) {
     hud.showMenu(netLabel(mode));
     return;
   }
-  S.phase = 'lobby';
-  refreshLobby();
+  // a 'start' may have raced in while we were connecting — don't clobber it
+  if (!S.lastStart) {
+    S.phase = 'lobby';
+    refreshLobby();
+  }
 }
 
 function refreshLobby() {
@@ -315,7 +318,10 @@ function onEvent(ev) {
       for (const k of (S.knowledge[S.myId] || [])) setMyAnswer(k.q, k.a, false);
       break;
     }
-    case 'phase': setPhase(data.phase, data.endsAt); break;
+    case 'phase':
+      (window.__phaseLog ||= []).push({ from, phase: data.phase, endsIn: data.endsAt - Date.now(), at: Date.now() });
+      setPhase(data.phase, data.endsAt);
+      break;
     case 'pose': S.poses[from] = data; break;
     case 'answers': if (S.answers[from]) S.answers[from] = data.filled; break;
     case 'act': handleAct(ev); break;
@@ -825,16 +831,12 @@ hud.showMenu(netLabel(P.get('net') || (onlineAvailable() ? 'online' : 'bc')));
 if (P.get('auto') === 'create') join(true, P.get('name') || 'Host', P.get('role') || 'student');
 else if (P.get('auto') === 'join') join(false, P.get('name') || 'Guest', P.get('role') || 'student', (P.get('room') || '').toUpperCase());
 
-let lastT = performance.now();
-function frame(nowMs) {
-  requestAnimationFrame(frame);
-  const dt = Math.min((nowMs - lastT) / 1000, 0.05);
-  lastT = nowMs;
+// Simulation heartbeat runs on an interval, NOT rAF, so the round keeps
+// going even when this tab is backgrounded (critical for the host).
+setInterval(() => {
+  if (!S.net) return;
   const t = now();
-
   hostTick();
-  dutyTick(dt);
-
   for (let i = S.pendingFx.length - 1; i >= 0; i--) {
     if (t >= S.pendingFx[i].at) { resolveAct(S.pendingFx[i].ev); S.pendingFx.splice(i, 1); }
   }
@@ -842,6 +844,17 @@ function frame(nowMs) {
     S.answersDirty = 0;
     S.net.send('answers', { filled: myAnswers() });
   }
+}, 100);
+
+let lastT = performance.now();
+function frame(nowMs) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((nowMs - lastT) / 1000, 0.05);
+  lastT = nowMs;
+  const t = now();
+
+  dutyTick(dt);
+
   if (S.net && t > S.poseDirty && ['prep', 'inspect', 'exam'].includes(S.phase)) {
     S.poseDirty = t + 0.12;
     if (isTeacher()) S.net.send('pose', { x: S.tPos.x, z: S.tPos.z, yaw: S.camYaw });
@@ -895,7 +908,7 @@ requestAnimationFrame(frame);
 window.__game = {
   get state() {
     return {
-      phase: S.phase, role: S.myRole, code: S.code, roster: S.roster.length,
+      phase: S.phase, phaseEnds: S.phaseEnds, role: S.myRole, code: S.code, roster: S.roster.length,
       seats: { ...S.seats }, myId: S.myId, answers: myAnswers(),
       strikes: { ...S.strikes }, expelled: { ...S.expelled },
       authority: S.authority, inspection: S.inspection, isHost: S.net ? S.net.isHost() : false,
@@ -914,9 +927,10 @@ window.__game = {
   confiscate: id => S.net.send('confiscate', { id }),
   accuse: pid => S.net.send('accuse', { target: pid }),
   answer: (q, a) => setMyAnswer(q, a),
-  skipPhase: () => { if (S.net.isHost()) S.phaseEnds = 0; },
+  skipPhase: () => { if (S.net.isHost()) { S.phaseEnds = 0; hostTick(); } },
   teacherTo: (x, z) => { S.tPos.x = x; S.tPos.z = z; },
   walkTo: (x, z) => { S.walk.x = x; S.walk.z = z; },
+  look: (yaw, pitch = 0) => { S.camYaw = yaw; S.camPitch = pitch; },
   get examKey() { return S.exam ? S.exam.map(q => q.correct) : []; },
   viewerOpen: () => !document.getElementById('viewer').classList.contains('hidden'),
 };
