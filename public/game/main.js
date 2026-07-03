@@ -53,6 +53,8 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 120);
 function resize() {
@@ -61,7 +63,7 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 addEventListener('resize', resize); resize();
-const { deskMeshes, surfaces } = buildRoom(scene);
+const { deskMeshes, paperMeshes, bottleMeshes, surfaces } = buildRoom(scene);
 const raycaster = new THREE.Raycaster();
 
 // ---------------------------------------------------------------- state
@@ -491,7 +493,8 @@ function setPhase(phase, endsAt) {
   hud.hideOverlays();
   hud.prepPanel(false); hud.centerHint(null);
   hud.studentHUD(false); hud.teacherHUD(false);
-  hud.closeScribbler();
+  hud.closeScribbler(); hud.wheel(false); hud.hoverTip(null);
+  hud.helpVisible(!isTeacher() && (phase === 'prep' || phase === 'exam'));
   sounds.bell();
   if (phase === 'prep') {
     hud.setPhase('STUDY PERIOD — RIG THE ROOM');
@@ -549,10 +552,14 @@ function tryAction(type, extra) {
     S.lastTapAt = now();
   }
   if (type === 'peek') {
-    const adj = students().filter(p => p.id !== S.myId && !S.expelled[p.id] &&
-      S.seats[p.id] != null && seatAdjacent(S.seats[p.id], mySeat()));
-    if (!adj.length) { hud.toast('No neighbor close enough to peek at', 'red'); return; }
-    meta.target = adj[0].id;
+    if (typeof extra === 'string') {
+      meta.target = extra;
+    } else {
+      const adj = students().filter(p => p.id !== S.myId && !S.expelled[p.id] &&
+        S.seats[p.id] != null && seatAdjacent(S.seats[p.id], mySeat()));
+      if (!adj.length) { hud.toast('No neighbor close enough to peek at', 'red'); return; }
+      meta.target = adj[0].id;
+    }
   }
   if (type === 'readArm' && !(S.attach[S.myId] || {}).arm) { hud.toast('Nothing written on your arm', 'red'); return; }
   if (type === 'readBottle' && !(S.attach[S.myId] || {}).bottle) { hud.toast('Your bottle label is blank', 'red'); return; }
@@ -648,20 +655,89 @@ addEventListener('pointermove', e => {
     lastX = e.clientX; lastY = e.clientY;
   }
   if (!isTeacher() && S.phase === 'exam') S.camYaw = clamp(S.camYaw, -2.4, 2.4);
+  // hover affordance
+  if (!dragging && !hud.scribblerOpen() && !hud.wheelOpen() &&
+      ['exam', 'inspect', 'prep'].includes(S.phase) && document.pointerLockElement !== canvas) {
+    setRay(e);
+    const p = probe();
+    hud.hoverTip(p && (S.aim == null) ? p.label : null, e.clientX, e.clientY);
+    canvas.style.cursor = p && p.kind !== 'far' ? 'pointer' : '';
+  } else if (!hud.scribblerOpen()) {
+    hud.hoverTip(null);
+  }
 });
 addEventListener('pointerup', e => {
   dragging = false;
   if (now() - downAt > 0.25) return;
   handleClick(e);
 });
+canvas.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (!isTeacher() && S.phase === 'exam' && !S.expelled[S.myId] && !hud.scribblerOpen()) hud.wheel(!hud.wheelOpen());
+});
+
+function setRay(e) {
+  const locked = document.pointerLockElement === canvas;
+  const ndc = locked ? new THREE.Vector2(0, 0)
+    : new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+}
+
+// One classifier for everything under the cursor — drives hover labels AND clicks.
+function probe() {
+  const noteHit = raycaster.intersectObjects([...S.notes.values()].map(n => n.mesh))[0];
+  if (isTeacher()) {
+    if (noteHit && ['inspect', 'exam'].includes(S.phase)) {
+      const note = [...S.notes.values()].find(n => n.mesh === noteHit.object);
+      return noteHit.distance < CONFISCATE_RANGE
+        ? { kind: 'confiscate', label: '🗑 rip it down', note }
+        : { kind: 'far', label: 'something\'s there…' };
+    }
+    if (S.phase === 'exam' && now() >= S.accuseReadyAt) {
+      for (const [pid, av] of Object.entries(S.avatars)) {
+        if (S.expelled[pid] || pid === S.myId) continue;
+        if (raycaster.intersectObjects([av.body, av.head])[0]) {
+          return { kind: 'accuse', label: '🫵 ACCUSE ' + nameOf(pid), pid };
+        }
+      }
+    }
+    return null;
+  }
+
+  // student
+  const seat = mySeat();
+  if (seat == null || S.expelled[S.myId]) return null;
+  if (S.phase === 'exam') {
+    if (noteHit) {
+      const note = [...S.notes.values()].find(n => n.mesh === noteHit.object);
+      const d = DESKS[seat];
+      return Math.hypot(note.pos[0] - d.x, note.pos[2] - d.z) < READ_RANGE
+        ? { kind: 'readNote', label: '🤫 grab the note', note }
+        : { kind: 'far', label: 'out of reach' };
+    }
+    if (raycaster.intersectObject(bottleMeshes[seat])[0])
+      return { kind: 'readBottle', label: (S.attach[S.myId] || {}).bottle ? '🥤 sip & read' : '🥤 just water' };
+    if (raycaster.intersectObject(paperMeshes[seat])[0])
+      return { kind: 'write', label: '✍️ write a note' };
+    if (raycaster.intersectObject(deskMeshes[seat])[0])
+      return { kind: 'tap', label: '👇 tap' };
+    for (const [pid, av] of Object.entries(S.avatars)) {
+      if (pid === S.myId || S.expelled[pid]) continue;
+      if (!seatAdjacent(S.seats[pid], seat)) continue;
+      if (raycaster.intersectObjects([av.body, av.head])[0] || raycaster.intersectObject(deskMeshes[S.seats[pid]])[0])
+        return { kind: 'peek', label: '👀 peek at ' + nameOf(pid), pid };
+    }
+  }
+  if (S.phase === 'prep' && paperMeshes[seat] && raycaster.intersectObject(paperMeshes[seat])[0])
+    return { kind: 'write', label: '✍️ write a note' };
+  return null;
+}
 
 function handleClick(e) {
-  if (hud.scribblerOpen()) return;
-  const ndc = new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
-  const locked = document.pointerLockElement === canvas;
-  raycaster.setFromCamera(locked ? new THREE.Vector2(0, 0) : ndc, camera);
+  if (hud.scribblerOpen() || hud.wheelOpen()) return;
+  setRay(e);
 
-  // student: place a written note on any surface (prep)
+  // aimed placements first
   if (!isTeacher() && S.aim && S.aim.mode === 'stick' && S.phase === 'prep') {
     const hit = raycaster.intersectObjects(surfaces)[0];
     if (hit && hit.distance < STICK_RANGE) {
@@ -670,49 +746,26 @@ function handleClick(e) {
     } else hud.toast('Too far — get closer to the surface', 'red');
     return;
   }
-  // student: throw a written note (exam)
   if (!isTeacher() && S.aim && S.aim.mode === 'throw' && S.phase === 'exam') {
     const hit = raycaster.intersectObjects(deskMeshes)[0];
     if (hit) throwNoteAt(hit.object.userData.seat);
     return;
   }
-  // student: read a hidden note within reach of your seat (exam)
-  if (!isTeacher() && S.phase === 'exam' && canAct() && mySeat() != null) {
-    const meshes = [...S.notes.values()].map(n => n.mesh);
-    const hit = raycaster.intersectObjects(meshes)[0];
-    if (hit) {
-      const note = [...S.notes.values()].find(n => n.mesh === hit.object);
-      const d = DESKS[mySeat()];
-      if (Math.hypot(note.pos[0] - d.x, note.pos[2] - d.z) < READ_RANGE) {
-        fireAction('readNote', { id: note.id });
-      } else hud.toast('Too far from your seat to reach that', 'red');
-      return;
-    }
-  }
-  if (!isTeacher()) return;
 
-  // teacher: rip down notes (inspect or exam)
-  if (['inspect', 'exam'].includes(S.phase)) {
-    const meshes = [...S.notes.values()].map(n => n.mesh);
-    const hit = raycaster.intersectObjects(meshes)[0];
-    if (hit && hit.distance < CONFISCATE_RANGE) {
-      const note = [...S.notes.values()].find(n => n.mesh === hit.object);
-      S.net.send('confiscate', { id: note.id });
-      return;
-    }
-  }
-  // teacher: accuse a student (exam)
-  if (S.phase === 'exam') {
-    const t = now();
-    if (t < S.accuseReadyAt) return;
-    for (const [pid, av] of Object.entries(S.avatars)) {
-      if (S.expelled[pid]) continue;
-      if (raycaster.intersectObjects([av.body, av.head])[0]) {
-        S.accuseReadyAt = t + ACCUSE_CD;
-        S.net.send('accuse', { target: pid });
-        return;
-      }
-    }
+  const p = probe();
+  if (!p) return;
+  switch (p.kind) {
+    case 'confiscate': S.net.send('confiscate', { id: p.note.id }); break;
+    case 'accuse':
+      S.accuseReadyAt = now() + ACCUSE_CD;
+      S.net.send('accuse', { target: p.pid });
+      break;
+    case 'readNote': if (canAct()) fireAction('readNote', { id: p.note.id }); break;
+    case 'readBottle': tryAction('readBottle'); break;
+    case 'write': openScrib(); break;
+    case 'tap': tryAction('tap'); break;
+    case 'peek': tryAction('peek', p.pid); break;
+    case 'far': hud.toast(p.label, 'red'); break;
   }
 }
 
@@ -811,6 +864,7 @@ function showResults(data) {
     ? 'The teacher neglected their duties. Students win by chaos.'
     : `Class average: <b>${Math.round(data.avg * 100)}%</b> (needed ${PASS_PCT * 100}%)`;
   hud.showResults(title, avgLine, data.rows);
+  hud.helpVisible(false); hud.wheel(false); hud.hoverTip(null);
   (studentsWin !== isTeacher()) ? sounds.win() : sounds.lose();
   S.phase = 'results';
 }
@@ -823,9 +877,8 @@ hud.init({
   onStart: () => hostStart(),
   onAgain: () => { S.phase = 'lobby'; S.resultsSent = false; hud.hideOverlays(); refreshLobby(); },
   onAnswer: (q, oi) => { if (S.phase === 'exam' && !S.expelled[S.myId]) setMyAnswer(q, oi); },
-  onAction: t => tryAction(t),
+  onWheel: (t, n) => tryAction(t, n),
 });
-hud.renderActionBar(ACTIONS);
 hud.showMenu(netLabel(P.get('net') || (onlineAvailable() ? 'online' : 'bc')));
 
 if (P.get('auto') === 'create') join(true, P.get('name') || 'Host', P.get('role') || 'student');
@@ -888,13 +941,8 @@ function frame(nowMs) {
     hud.strikesHud(students().map(p =>
       `${p.name}: ${'⚠️'.repeat(S.strikes[p.id] || 0) || '—'}${S.expelled[p.id] ? ' 💀' : ''}`));
   } else if (S.phase === 'exam') {
-    hud.actionBarState(type => {
-      const busy = t < S.busyUntil;
-      let disabled = busy || S.expelled[S.myId];
-      if (type === 'readArm') disabled = disabled || !(S.attach[S.myId] || {}).arm;
-      if (type === 'readBottle') disabled = disabled || !(S.attach[S.myId] || {}).bottle;
-      return { disabled, busy: busy && S.busyType === type, tip: ACT[type].label };
-    });
+    const busyLeft = S.busyUntil - t;
+    hud.busy(busyLeft > 0 && S.busyType ? busyLeft / ACT[S.busyType].dur : null);
   }
 
   updateCamera(dt);

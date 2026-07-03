@@ -47,72 +47,89 @@
   #resultsRows .val { color: #e0b64e; font-weight: 800; }
   #avgLine { font-size: 19px; margin-top: 6px; }
 
-  /* ---------- HUD ---------- */
+  /* ---------- HUD (minimal) ---------- */
   .hud { position: fixed; z-index: 20; pointer-events: none; }
   #topbar { top: 12px; left: 50%; transform: translateX(-50%); text-align: center;
-    background: rgba(16,18,28,.72); border-radius: 12px; padding: 7px 22px; }
-  #phaseLabel { font-size: 11.5px; letter-spacing: 3px; opacity: .7; }
-  #phaseTimer { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    background: rgba(14,16,24,.6); border-radius: 12px; padding: 6px 20px; backdrop-filter: blur(4px); }
+  #phaseLabel { font-size: 10.5px; letter-spacing: 3px; opacity: .65; }
+  #phaseTimer { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  #busyBar { height: 3px; border-radius: 3px; background: #e0b64e; width: 0%; margin-top: 4px; transition: width .1s linear; }
 
-  #banner { top: 22%; left: 50%; transform: translateX(-50%); font-size: clamp(22px, 4vw, 40px); font-weight: 900;
+  #banner { top: 20%; left: 50%; transform: translateX(-50%); font-size: clamp(22px, 4vw, 38px); font-weight: 900;
     letter-spacing: 2px; color: #ffd76a; text-shadow: 0 3px 16px rgba(0,0,0,.8); opacity: 0; transition: opacity .3s; text-align: center; }
 
-  #toasts { bottom: 130px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column-reverse;
+  #toasts { bottom: 60px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column-reverse;
     gap: 6px; align-items: center; }
-  .toast { background: rgba(20,24,36,.92); border: 1px solid #3a4156; border-radius: 10px; padding: 8px 16px;
-    font-size: 14px; animation: tIn .25s ease-out; max-width: 80vw; }
+  .toast { background: rgba(18,21,32,.9); border: 1px solid #3a4156; border-radius: 10px; padding: 7px 15px;
+    font-size: 13.5px; animation: tIn .25s ease-out; max-width: 78vw; }
   .toast.gold { border-color: #e0b64e; color: #ffd76a; }
   .toast.red { border-color: #c05050; color: #ff9a9a; }
   @keyframes tIn { from { opacity: 0; transform: translateY(10px); } }
 
-  /* student sheet */
-  #sheetPanel { top: 70px; right: 12px; width: 315px; max-height: calc(100vh - 220px); overflow-y: auto;
-    background: #f2eddc; color: #2a2418; border-radius: 10px; padding: 13px 14px; pointer-events: auto;
-    box-shadow: 0 8px 30px rgba(0,0,0,.5); font-size: 13.5px; }
-  #sheetPanel h3 { font-size: 14px; letter-spacing: 1px; margin-bottom: 8px; color: #6a1f1f; }
-  .q { padding: 7px 8px; border-radius: 8px; margin-bottom: 4px; border: 2px solid transparent; }
-  .q .qt { font-weight: 600; line-height: 1.35; }
-  .q .opts { display: flex; gap: 5px; margin-top: 6px; }
-  .q .opts button { flex: 1; padding: 4px 0; border-radius: 6px; border: 1px solid #b9ac8a; background: #faf6ea;
-    font-size: 12.5px; font-weight: 700; color: #4a3f28; }
-  .q .opts button.pick { background: #3a5a9a; border-color: #3a5a9a; color: #fff; }
+  /* exam sheet — a real piece of paper */
+  #sheetPanel { top: 66px; right: 14px; width: 288px; max-height: calc(100vh - 130px); overflow-y: auto;
+    background: repeating-linear-gradient(#f6f1e0, #f6f1e0 25px, #e9e2cc 26px); color: #2a2418;
+    border-radius: 4px 10px 10px 4px; padding: 12px 13px 12px 20px; pointer-events: auto;
+    box-shadow: 0 10px 34px rgba(0,0,0,.55); font-size: 13px; transform: rotate(.4deg);
+    border-left: 3px solid rgba(190,90,90,.5); }
+  #sheetPanel h3 { font-size: 13.5px; letter-spacing: 1px; margin-bottom: 7px; color: #6a1f1f; font-family: Georgia, serif; }
+  .q { padding: 6px 6px; border-radius: 6px; margin-bottom: 3px; }
+  .q .qt { font-weight: 600; line-height: 1.3; }
+  .q .opts { display: flex; gap: 5px; margin-top: 5px; }
+  .q .opts button { flex: 1; padding: 3px 0; border-radius: 6px; border: 1px solid #b9ac8a; background: rgba(250,246,234,.7);
+    font-size: 12px; font-weight: 700; color: #4a3f28; }
+  .q .opts button.pick { background: #33508c; border-color: #33508c; color: #fff; }
   .q.studied .qt::after { content: ' 📖'; }
 
-  /* action bar */
-  #actionBar { bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; flex-wrap: wrap;
-    justify-content: center; pointer-events: auto; max-width: 96vw; }
-  #actionBar button { background: rgba(24,28,42,.9); border: 1px solid #3a4156; color: #dfe3f0; border-radius: 9px;
-    padding: 7px 10px; font-size: 12px; line-height: 1.3; min-width: 64px; }
-  #actionBar button b { display: block; font-size: 14px; color: #ffd76a; }
-  #actionBar button:disabled { opacity: .35; cursor: default; }
-  #actionBar button.busy { border-color: #e0b64e; }
-
-  /* teacher HUD */
-  #teachBar { top: 70px; left: 12px; width: 230px; background: rgba(16,18,28,.78); border-radius: 12px;
-    padding: 12px 14px; font-size: 13px; }
-  .meter { height: 10px; border-radius: 6px; background: #12141e; margin: 4px 0 10px; overflow: hidden; }
-  .meter i { display: block; height: 100%; border-radius: 6px; transition: width .3s; }
+  /* teacher HUD — compact */
+  #teachBar { top: 66px; left: 14px; width: 172px; background: rgba(14,16,24,.62); border-radius: 12px;
+    padding: 10px 12px; font-size: 11px; letter-spacing: .5px; backdrop-filter: blur(4px); }
+  .meter { height: 7px; border-radius: 5px; background: #10121c; margin: 3px 0 8px; overflow: hidden; }
+  .meter i { display: block; height: 100%; border-radius: 5px; transition: width .3s; }
   #authFill { background: linear-gradient(90deg, #c05050, #e0b64e); }
   #inspFill { background: linear-gradient(90deg, #4e86c7, #5da85e); }
-  #dutyLabel { color: #ffd76a; font-weight: 700; min-height: 18px; }
-  #cdLabel { opacity: .8; margin-top: 6px; }
-  #strikesHud { margin-top: 8px; font-size: 12px; opacity: .85; line-height: 1.6; }
+  #dutyLabel { color: #ffd76a; font-weight: 700; font-size: 12px; min-height: 15px; }
+  #cdLabel { opacity: .75; margin-top: 4px; font-size: 11.5px; }
+  #strikesHud { margin-top: 6px; font-size: 11.5px; opacity: .85; line-height: 1.55; }
 
-  #crosshair { top: 50%; left: 50%; transform: translate(-50%,-50%); width: 6px; height: 6px; border-radius: 50%;
+  #crosshair { top: 50%; left: 50%; transform: translate(-50%,-50%); width: 5px; height: 5px; border-radius: 50%;
     background: #fff; box-shadow: 0 0 8px rgba(0,0,0,.8); }
-  #centerHint { top: 58%; left: 50%; transform: translateX(-50%); background: rgba(16,18,28,.8);
-    padding: 8px 18px; border-radius: 10px; font-size: 14px; color: #ffd76a; }
+  #centerHint { top: 60%; left: 50%; transform: translateX(-50%); background: rgba(14,16,24,.72);
+    padding: 7px 16px; border-radius: 10px; font-size: 13px; color: #ffd76a; }
 
-  /* prep info */
-  #prepPanel { top: 70px; left: 12px; width: 265px; background: #232837ee; border: 1px solid #3a4156;
-    border-radius: 14px; padding: 15px 17px; pointer-events: auto; font-size: 13px; line-height: 1.55; }
-  #prepPanel h3 { color: #ffd76a; letter-spacing: 1px; margin-bottom: 7px; font-size: 15px; }
-  #studied { margin: 8px 0; display: flex; flex-direction: column; gap: 5px; }
-  #studied div { background: #171b26; padding: 7px 10px; border-radius: 8px; font-size: 12.5px; }
+  /* prep chip — tiny */
+  #prepPanel { top: 66px; left: 14px; width: 230px; background: rgba(14,16,24,.62); backdrop-filter: blur(4px);
+    border-radius: 12px; padding: 12px 14px; pointer-events: auto; font-size: 12.5px; line-height: 1.5; }
+  #prepPanel h3 { color: #ffd76a; letter-spacing: 1px; margin-bottom: 5px; font-size: 13px; }
+  #studied { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+  #studied div { background: rgba(255,255,255,.06); padding: 6px 9px; border-radius: 7px; font-size: 11.5px; }
   #studied b { color: #8fe39e; }
-  #noteCount { margin-top: 8px; color: #8fb5ff; }
+  #noteCount { margin-top: 6px; color: #8fb5ff; font-size: 11.5px; }
 
-  /* ---------- Scribbler (the infinite-cheat pen) ---------- */
+  /* hover affordance */
+  #hoverTip { position: fixed; z-index: 24; pointer-events: none; background: rgba(14,16,24,.85);
+    border: 1px solid rgba(224,182,78,.5); color: #ffd76a; font-size: 12px; padding: 4px 10px;
+    border-radius: 999px; transform: translate(14px, 14px); white-space: nowrap; }
+
+  /* emote wheel (right-click) */
+  #wheel { position: fixed; inset: 0; z-index: 46; background: rgba(10,12,20,.35); backdrop-filter: blur(2px); }
+  #wheel .wItem { position: absolute; top: 50%; left: 50%; width: 62px; height: 62px; border-radius: 50%;
+    background: rgba(22,26,40,.94); border: 2px solid #3a4156; color: #f0ede4; font-size: 24px; line-height: 1;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    transition: transform .08s, border-color .08s; }
+  #wheel .wItem small { font-size: 8.5px; letter-spacing: .5px; opacity: .65; }
+  #wheel .wItem:hover { transform: scale(1.16) translate(var(--tx), var(--ty)) !important; border-color: #e0b64e; }
+  #wheel .wCenter { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    font-size: 11px; letter-spacing: 2px; opacity: .55; pointer-events: none; }
+
+  /* help */
+  #helpBtn { position: fixed; z-index: 26; bottom: 14px; right: 14px; width: 34px; height: 34px; border-radius: 50%;
+    background: rgba(22,26,40,.8); border: 1px solid #3a4156; color: #cfd3e0; font-size: 16px; font-weight: 700; }
+  #helpCard { position: fixed; z-index: 26; bottom: 56px; right: 14px; width: 265px; background: rgba(16,19,30,.95);
+    border: 1px solid #3a4156; border-radius: 12px; padding: 13px 15px; font-size: 12px; line-height: 1.75; }
+  #helpCard b { color: #ffd76a; font-weight: 700; }
+
+  /* ---------- Scribbler ---------- */
   #scrib { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
     background: rgba(10,12,20,.75); }
   #scribBox { background: #2a2f40; border: 1px solid #4a5270; border-radius: 16px; padding: 16px; }
@@ -141,14 +158,14 @@
     transform: rotate(-1.5deg); box-shadow: 0 10px 40px rgba(0,0,0,.5); }
   #viewerClose { margin-top: 12px; padding: 8px 26px; border-radius: 9px; border: none; background: #4a5270; color: #fff; }
 
-  #miniView { position: fixed; z-index: 22; bottom: 130px; left: 12px; pointer-events: none; }
+  #miniView { position: fixed; z-index: 22; bottom: 60px; left: 14px; pointer-events: none; }
   #miniView img { width: 170px; border-radius: 8px; transform: rotate(2deg); box-shadow: 0 8px 24px rgba(0,0,0,.55); }
   #miniLabel { font-size: 11.5px; color: #ffd76a; margin-bottom: 4px; text-shadow: 0 1px 4px #000; }
 
   #riotFlash { position: fixed; inset: 0; z-index: 15; pointer-events: none; opacity: 0;
     background: radial-gradient(ellipse at center, transparent 55%, rgba(255,120,40,.35) 100%); transition: opacity .4s; }
   #vig { position: fixed; inset: 0; z-index: 5; pointer-events: none;
-    background: radial-gradient(ellipse at center, transparent 60%, rgba(5,6,12,.5) 100%); }
+    background: radial-gradient(ellipse at center, transparent 62%, rgba(5,6,12,.42) 100%); }
 </style>
 </head>
 <body>
@@ -157,14 +174,13 @@
 <div id="riotFlash"></div>
 
 <!-- HUD -->
-<div class="hud" id="topbar"><div id="phaseLabel">—</div><div id="phaseTimer">0:00</div></div>
+<div class="hud" id="topbar"><div id="phaseLabel">—</div><div id="phaseTimer">0:00</div><div id="busyBar"></div></div>
 <div class="hud" id="banner"></div>
 <div class="hud" id="toasts"></div>
 <div class="hud hidden" id="sheetPanel"></div>
-<div class="hud hidden" id="actionBar"></div>
 <div class="hud hidden" id="teachBar">
   <div>AUTHORITY</div><div class="meter"><i id="authFill" style="width:100%"></i></div>
-  <div>INSPECTION RATING</div><div class="meter"><i id="inspFill" style="width:100%"></i></div>
+  <div>INSPECTION</div><div class="meter"><i id="inspFill" style="width:100%"></i></div>
   <div id="dutyLabel"></div>
   <div id="cdLabel"></div>
   <div id="strikesHud"></div>
@@ -172,15 +188,27 @@
 <div class="hud hidden" id="crosshair"></div>
 <div class="hud hidden" id="centerHint"></div>
 <div class="hud hidden" id="prepPanel">
-  <h3>📚 STUDY PERIOD</h3>
-  The teacher is away. <b>Walk around (WASD)</b> and rig the room.<br><br>
-  Press <b style="color:#ffd76a">N</b> to write a note — anything you can draw.
-  Stick notes on <b>any surface</b>: under desks, on your arm, your bottle,
-  behind the board… even the teacher's desk.
+  <h3>☕ TEACHER'S AWAY</h3>
+  Rig the room before the bell.
   <div id="studied"></div>
   <div id="noteCount"></div>
 </div>
 <div class="hud hidden" id="miniView"><div id="miniLabel"></div><img id="miniImg" alt=""></div>
+<div id="hoverTip" class="hidden"></div>
+
+<!-- emote wheel -->
+<div id="wheel" class="hidden"><div class="wCenter">GESTURES</div></div>
+
+<!-- help -->
+<button id="helpBtn" class="hidden">?</button>
+<div id="helpCard" class="hidden">
+  <b>Everything is clickable.</b><br>
+  your paper → write a note<br>
+  your bottle / desk / a neighbor → use them<br>
+  hidden notes → grab them<br>
+  <b>Right-click</b> → gestures &nbsp;·&nbsp; <b>A/D</b> lean<br>
+  <b>N</b> write &nbsp;·&nbsp; <b>WASD</b> walk (when free)
+</div>
 
 <!-- Scribbler -->
 <div id="scrib" class="hidden">

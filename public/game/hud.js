@@ -15,8 +15,57 @@ export function init(cb) {
   $('btnStart').onclick = () => CB.onStart();
   $('btnAgain').onclick = () => CB.onAgain();
   $('viewerClose').onclick = () => show('viewer', false);
+  $('helpBtn').onclick = () => $('helpCard').classList.toggle('hidden');
+  initWheel();
   initScribbler();
 }
+
+// ---------------------------------------------------------------- emote wheel
+
+const WHEEL_ITEMS = [
+  { act: 'fingers', n: 1, icon: '☝️', label: 'one' },
+  { act: 'fingers', n: 2, icon: '✌️', label: 'two' },
+  { act: 'fingers', n: 3, icon: '🤟', label: 'three' },
+  { act: 'fingers', n: 4, icon: '🖐️', label: 'four' },
+  { act: 'flash', icon: '📄', label: 'flash' },
+  { act: 'raise', icon: '✋', label: 'sir!' },
+  { act: 'cough', icon: '😷', label: 'cough' },
+  { act: 'shifty', icon: '😬', label: 'shifty' },
+];
+
+function initWheel() {
+  const w = $('wheel');
+  WHEEL_ITEMS.forEach((it, i) => {
+    const a = (i / WHEEL_ITEMS.length) * Math.PI * 2 - Math.PI / 2;
+    const b = document.createElement('button');
+    b.className = 'wItem';
+    const tx = Math.cos(a) * 118 - 31, ty = Math.sin(a) * 118 - 31;
+    b.style.transform = `translate(${tx}px, ${ty}px)`;
+    b.style.setProperty('--tx', tx / 1.16 + 'px');
+    b.style.setProperty('--ty', ty / 1.16 + 'px');
+    b.innerHTML = `${it.icon}<small>${it.label}</small>`;
+    b.onclick = e => { e.stopPropagation(); wheel(false); CB.onWheel(it.act, it.n); };
+    w.appendChild(b);
+  });
+  w.onclick = () => wheel(false);
+}
+export function wheel(open) { show('wheel', open); }
+export function wheelOpen() { return !$('wheel').classList.contains('hidden'); }
+
+export function hoverTip(text, x, y) {
+  show('hoverTip', !!text);
+  if (text) {
+    $('hoverTip').textContent = text;
+    $('hoverTip').style.left = x + 'px';
+    $('hoverTip').style.top = y + 'px';
+  }
+}
+
+export function busy(frac) {
+  $('busyBar').style.width = frac == null ? '0%' : Math.round((1 - frac) * 100) + '%';
+}
+
+export function helpVisible(v) { show('helpBtn', v); if (!v) show('helpCard', false); }
 
 export function showMenu(netLabel) {
   show('menu', true); show('lobby', false); show('resultsOv', false); show('staffroom', false);
@@ -74,7 +123,7 @@ export function banner(text, dur = 2500) {
   bannerT = setTimeout(() => { $('banner').style.opacity = 0; }, dur);
 }
 
-export function studentHUD(v) { show('sheetPanel', v); show('actionBar', v); }
+export function studentHUD(v) { show('sheetPanel', v); }
 export function teacherHUD(v) { show('teachBar', v); show('crosshair', v); }
 export function prepPanel(v) { show('prepPanel', v); }
 export function centerHint(text) { show('centerHint', !!text); if (text) $('centerHint').textContent = text; }
@@ -110,26 +159,6 @@ export function renderSheet(exam, answers, knownQs) {
     d.appendChild(opts);
     p.appendChild(d);
   });
-}
-
-export function renderActionBar(actions) {
-  const bar = $('actionBar');
-  bar.innerHTML = '';
-  for (const a of actions) {
-    const b = document.createElement('button');
-    b.id = 'act_' + a.type;
-    b.innerHTML = `<b>${a.key}</b>${a.label}`;
-    b.onclick = () => CB.onAction(a.type);
-    bar.appendChild(b);
-  }
-}
-export function actionBarState(fn) {
-  for (const b of $('actionBar').children) {
-    const st = fn(b.id.slice(4));
-    b.disabled = !!st.disabled;
-    b.classList.toggle('busy', !!st.busy);
-    b.title = st.tip || '';
-  }
 }
 
 export function meters(auth, insp) {
