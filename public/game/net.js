@@ -30,15 +30,16 @@ class BaseNet {
     return sorted[0].id === this.id;
   }
   loopback(type, data) {
+    // synchronous echo: our own events apply in-order, immediately
     const ev = { type, data, from: this.id, t: Date.now() };
-    queueMicrotask(() => this.emit(ev));
+    this.emit(ev);
     return ev;
   }
 }
 
 export class LocalNet extends BaseNet {
-  async join(_code, name, role) {
-    this.roster = [{ id: this.id, name, role, joinedAt: Date.now() }];
+  async join(_code, name, role, skin) {
+    this.roster = [{ id: this.id, name, role, skin, joinedAt: Date.now() }];
     this.emitRoster();
   }
   send(type, data) { this.loopback(type, data); }
@@ -46,8 +47,8 @@ export class LocalNet extends BaseNet {
 }
 
 export class BCNet extends BaseNet {
-  async join(code, name, role) {
-    this.me = { id: this.id, name, role, joinedAt: Date.now() };
+  async join(code, name, role, skin) {
+    this.me = { id: this.id, name, role, skin, joinedAt: Date.now() };
     this.ch = new BroadcastChannel('exam-' + code);
     this.peers = new Map([[this.id, { ...this.me, seen: Infinity }]]);
     this.ch.onmessage = ({ data: msg }) => {
@@ -88,17 +89,17 @@ export class BCNet extends BaseNet {
 }
 
 export class SupabaseNet extends BaseNet {
-  async join(code, name, role) {
+  async join(code, name, role, skin) {
     // window.supabase is provided by vendor/supabase.umd.js
     this.client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    this.me = { id: this.id, name, role, joinedAt: Date.now() };
+    this.me = { id: this.id, name, role, skin, joinedAt: Date.now() };
     this.chan = this.client.channel('exam:' + code, {
       config: { presence: { key: this.id }, broadcast: { self: false } },
     });
     this.chan.on('presence', { event: 'sync' }, () => {
       const state = this.chan.presenceState();
       this.roster = Object.values(state).map(metas => metas[0])
-        .map(m => ({ id: m.id, name: m.name, role: m.role, joinedAt: m.joinedAt }));
+        .map(m => ({ id: m.id, name: m.name, role: m.role, skin: m.skin, joinedAt: m.joinedAt }));
       this.emitRoster();
     });
     this.chan.on('broadcast', { event: 'e' }, ({ payload }) => this.emit(payload));

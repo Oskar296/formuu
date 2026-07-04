@@ -4,6 +4,9 @@ import { buildRoom, makeStudent, makeTeacher, flyNote, tickFlights, makeNoteMesh
 import { generateExam, dealKnowledge, score, N_QUESTIONS } from './exam.js';
 import { makeNet, onlineAvailable } from './net.js';
 import * as hud from './hud.js';
+import { makePost } from './postfx.js';
+import { setupEnvironment, tickAmbient, makeMannequin } from './scene.js';
+import { profile, SKIN_CATALOG, lookFor } from './profile.js';
 
 // THE EXAM — infinite-cheat edition.
 // The game defines NO cheats. It gives students paper, a pen, surfaces and
@@ -61,8 +64,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.1;
+renderer.toneMapping = THREE.NoToneMapping; // the post pipeline grades the frame
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 120);
 function resize() {
@@ -72,6 +74,9 @@ function resize() {
 }
 addEventListener('resize', resize); resize();
 const { deskMeshes, paperMeshes, bottleMeshes, surfaces } = buildRoom(scene);
+setupEnvironment(renderer, scene);
+const LOWFX = !!P.get('lowfx'); // headless test escape hatch
+const post = LOWFX ? null : makePost(renderer);
 const raycaster = new THREE.Raycaster();
 
 // ---------------------------------------------------------------- state
@@ -153,12 +158,13 @@ async function join(create, name, role, code) {
     : code;
   if (!S.code || S.code.length !== 4) { hud.toast('Enter a 4-letter code', 'red'); return; }
   S.myName = name; S.myRole = role;
+  profile.name = name;
   S.net = makeNet(mode);
   S.myId = S.net.id;
   S.net.onEvent(onEvent);
   S.net.onRoster(r => { S.roster = r; if (S.phase === 'lobby') refreshLobby(); });
   try {
-    await S.net.join(S.code, name, role);
+    await S.net.join(S.code, name, role, profile.equipped);
   } catch (e) {
     hud.toast(e.message, 'red');
     hud.showMenu(netLabel(mode));
@@ -278,7 +284,8 @@ function hostResults(reason) {
   if (reason === 'principal') pass = true;
   if (reason === 'expelled') pass = false;
   if (rows[0]) rows[0].crown = true;
-  S.net.send('results', { rows, avg, pass, reason });
+  const totalStrikes = Object.values(S.strikes).reduce((a, b) => a + b, 0);
+  S.net.send('results', { rows, avg, pass, reason, totalStrikes });
 }
 
 // ---------------------------------------------------------------- host: adjudication
@@ -927,7 +934,7 @@ function buildAvatars() {
   S.avatars = {}; S.poses = {};
   for (const pid in S.seats) {
     const p = S.roster.find(r => r.id === pid);
-    const av = makeStudent(scene, S.seats[pid], S.seats[pid], p ? p.name : '???');
+    const av = makeStudent(scene, S.seats[pid], lookFor(p && p.skin, S.seats[pid]), p ? p.name : '???');
     if (pid === S.myId) av.setVisible(false);
     S.avatars[pid] = av;
   }
@@ -959,9 +966,9 @@ function pushOut(pos, cx, cz, r) {
 
 function updateCamera(dt) {
   if (S.phase === 'menu' || S.phase === 'lobby' || S.phase === 'results') {
-    const t = now() * 0.1;
-    camera.position.set(Math.sin(t) * 9, 5, Math.cos(t) * 9);
-    camera.lookAt(0, 1, 0);
+    const t = now() * 0.12;
+    camera.position.set(Math.sin(t) * 4.6 - 1.2, 2.1, Math.cos(t) * 3.4 + 2.6);
+    camera.lookAt(-0.3, 1.15, 1.2);
     return;
   }
   if (isTeacher()) {
@@ -1025,6 +1032,16 @@ function showResults(data) {
     : `Class average: <b>${Math.round(data.avg * 100)}%</b> (needed ${PASS_PCT * 100}%)`;
   hud.showResults(title, avgLine, data.rows);
   hud.helpVisible(false); hud.wheel(false); hud.hoverTip(null);
+  // Chalk earnings
+  let earn;
+  if (isTeacher()) earn = 40 + (studentsWin ? 0 : 50) + 10 * (data.totalStrikes || 0);
+  else {
+    const me = data.rows.find(r => r.id === S.myId);
+    earn = 30 + (studentsWin ? 40 : 0) + (me && me.crown ? 25 : 0);
+  }
+  profile.addCoins(earn);
+  hud.setProfile(profile.name, profile.coins);
+  setTimeout(() => hud.toast(`🪙 +${earn} Chalk earned!`, 'gold'), 800);
   (studentsWin !== isTeacher()) ? sounds.win() : sounds.lose();
   S.phase = 'results';
 }
@@ -1039,7 +1056,39 @@ hud.init({
   onAnswer: (q, oi) => { if (S.phase === 'exam' && !S.expelled[S.myId]) setMyAnswer(q, oi); },
   onWheel: (t, n) => tryAction(t, n),
   onTrap: kind => chooseTrap(kind),
+  onName: v => { profile.name = v; refreshMannequin(); },
+  onLockerOpen: () => refreshLocker(),
+  onSkin: id => {
+    const skin = SKIN_CATALOG.find(x => x.id === id);
+    if (!skin) return;
+    if (profile.owned.includes(id)) profile.equip(id);
+    else if (profile.buy(id)) { profile.equip(id); hud.toast(`${skin.emoji} ${skin.name} unlocked!`, 'gold'); }
+    else { hud.toast(`Not enough Chalk — earn 🪙 by playing rounds`, 'red'); return; }
+    hud.setProfile(profile.name, profile.coins);
+    refreshLocker();
+    refreshMannequin();
+  },
 });
+hud.setProfile(profile.name, profile.coins);
+
+function refreshLocker() {
+  hud.renderLocker(SKIN_CATALOG.map(sk => ({
+    id: sk.id, name: sk.name, cost: sk.cost, emoji: sk.emoji,
+    owned: profile.owned.includes(sk.id),
+    equipped: profile.equipped === sk.id,
+    affordable: profile.coins >= sk.cost,
+  })));
+}
+
+// home-screen mannequin wearing your equipped skin
+let mannequin = null;
+function refreshMannequin() {
+  if (mannequin) { mannequin.dispose(); mannequin = null; }
+  if (['menu', 'lobby', 'results'].includes(S.phase)) {
+    mannequin = makeMannequin(scene, lookFor(profile.equipped, 3), profile.name || 'you');
+  }
+}
+refreshMannequin();
 hud.showMenu(netLabel(P.get('net') || (onlineAvailable() ? 'online' : 'bc')));
 
 if (P.get('auto') === 'create') join(true, P.get('name') || 'Host', P.get('role') || 'student');
@@ -1106,9 +1155,17 @@ function frame(nowMs) {
     hud.busy(busyLeft > 0 && S.busyType ? busyLeft / ACT[S.busyType].dur : null);
   }
 
+  const inMenu = ['menu', 'lobby', 'results'].includes(S.phase);
+  if (inMenu && !mannequin) refreshMannequin();
+  if (!inMenu && mannequin) { mannequin.dispose(); mannequin = null; }
+  if (mannequin) mannequin.tick(t);
+
+  hud.topbar(!inMenu);
   updateCamera(dt);
   tickFlights(scene, dt);
-  renderer.render(scene, camera);
+  tickAmbient(t);
+  if (post) post.render(scene, camera);
+  else renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
 

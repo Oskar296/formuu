@@ -16,6 +16,29 @@
   /* ---------- overlays ---------- */
   .ov { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center;
     justify-content: center; background: rgba(14,16,24,.88); backdrop-filter: blur(5px); text-align: center; padding: 18px; }
+  #menu { background: linear-gradient(100deg, rgba(14,16,24,.15) 42%, rgba(14,16,24,.82) 60%);
+    backdrop-filter: none; flex-direction: row; justify-content: flex-end; }
+  #menuRight { display: flex; flex-direction: column; align-items: center; margin-right: 4vw; }
+  #profRow { display: flex; gap: 10px; margin-top: 20px; width: min(430px, 92vw); }
+  #profRow input { flex: 1; padding: 10px 13px; border-radius: 10px; border: 1px solid #4a5270;
+    background: #171b26cc; color: #f0ede4; font-size: 15px; text-align: center; }
+  #coinBadge { display: flex; align-items: center; gap: 6px; padding: 0 16px; border-radius: 10px;
+    background: #171b26cc; border: 1px solid #6a5a2e; color: #ffd76a; font-weight: 800; font-size: 15px; }
+  #btnLocker { width: 100%; padding: 11px; font-size: 14px; font-weight: 700; letter-spacing: 1px; margin-top: 10px;
+    border-radius: 10px; border: 1px solid #4a5270; background: #2c3247cc; color: #eaeef8; }
+
+  /* locker */
+  #lockerGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
+    width: min(690px, 94vw); max-height: 60vh; overflow-y: auto; margin-top: 18px; }
+  .skinCard { background: #232837; border: 2px solid #3a4156; border-radius: 14px; padding: 14px 10px 12px;
+    cursor: pointer; transition: border-color .12s, transform .12s; }
+  .skinCard:hover { transform: translateY(-2px); border-color: #7a8ac9; }
+  .skinCard.equipped { border-color: #e0b64e; box-shadow: 0 0 18px rgba(224,182,78,.25); }
+  .skinCard .em { font-size: 44px; }
+  .skinCard .nm { font-size: 13.5px; font-weight: 700; margin-top: 6px; }
+  .skinCard .pr { font-size: 12px; margin-top: 4px; color: #ffd76a; }
+  .skinCard .pr.own { color: #8fe39e; }
+  .skinCard.locked { filter: saturate(.4) brightness(.75); }
   h1 { font-size: clamp(34px, 6vw, 58px); font-weight: 900; letter-spacing: 3px; color: #f5f2e8;
     text-shadow: 0 3px 0 #8a2f2f, 0 6px 22px rgba(0,0,0,.6); }
   .tag { letter-spacing: 4px; font-size: 13px; opacity: .6; margin-top: 6px; }
@@ -256,10 +279,14 @@
 
 <!-- overlays -->
 <div class="ov" id="menu">
+  <div id="menuRight">
   <h1>📝 THE EXAM</h1>
   <div class="tag">CHEAT TOGETHER · DON'T GET CAUGHT</div>
-  <div class="card">
-    <input type="text" id="nameInput" maxlength="14" placeholder="your name">
+  <div id="profRow">
+    <input type="text" id="nameInput" maxlength="14" placeholder="pick a username">
+    <div id="coinBadge">🪙 <span id="coinCount">0</span></div>
+  </div>
+  <div class="card" style="margin-top:14px">
     <div class="roleRow">
       <button id="roleStudent" class="sel">🙋 Student</button>
       <button id="roleTeacher">🧑‍🏫 Teacher</button>
@@ -269,8 +296,17 @@
       <input type="text" id="codeInput" maxlength="4" placeholder="CODE">
       <button id="btnJoin">JOIN</button>
     </div>
+    <button id="btnLocker">🎒 LOCKER — skins</button>
     <div class="note" id="netNote"></div>
   </div>
+  </div>
+</div>
+
+<div class="ov hidden" id="locker">
+  <h1 style="font-size:34px">🎒 LOCKER</h1>
+  <div class="tag">EARN 🪙 CHALK BY PLAYING ROUNDS</div>
+  <div id="lockerGrid"></div>
+  <button class="bigBtn" style="width:min(320px,90vw);margin-top:18px" id="btnLockerClose">DONE</button>
 </div>
 
 <div class="ov hidden" id="lobby">

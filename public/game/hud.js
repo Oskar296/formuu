@@ -16,6 +16,9 @@ export function init(cb) {
   $('btnAgain').onclick = () => CB.onAgain();
   $('viewerClose').onclick = () => show('viewer', false);
   $('helpBtn').onclick = () => $('helpCard').classList.toggle('hidden');
+  $('nameInput').addEventListener('input', () => CB.onName($('nameInput').value));
+  $('btnLocker').onclick = () => { CB.onLockerOpen(); show('locker', true); };
+  $('btnLockerClose').onclick = () => show('locker', false);
   initWheel();
   initScribbler();
 }
@@ -106,6 +109,25 @@ export function showMenu(netLabel) {
   $('netNote').textContent = netLabel;
 }
 
+export function setProfile(name, coinCount) {
+  if (document.activeElement !== $('nameInput')) $('nameInput').value = name;
+  $('coinCount').textContent = coinCount;
+}
+export function lockerOpen() { return !$('locker').classList.contains('hidden'); }
+
+export function renderLocker(cards) {
+  const grid = $('lockerGrid');
+  grid.innerHTML = '';
+  for (const c of cards) {
+    const d = document.createElement('div');
+    d.className = 'skinCard' + (c.equipped ? ' equipped' : '') + (!c.owned && !c.affordable ? ' locked' : '');
+    d.innerHTML = `<div class="em">${c.emoji}</div><div class="nm">${c.name}</div>
+      <div class="pr ${c.owned ? 'own' : ''}">${c.equipped ? 'EQUIPPED' : c.owned ? 'tap to equip' : '🪙 ' + c.cost}</div>`;
+    d.onclick = () => CB.onSkin(c.id);
+    grid.appendChild(d);
+  }
+}
+
 export function showLobby(code, roster, isHost, canStart, hint) {
   show('menu', false); show('lobby', true); show('resultsOv', false);
   $('roomCodeBig').textContent = code;
@@ -121,7 +143,7 @@ export function showLobby(code, roster, isHost, canStart, hint) {
 }
 
 export function hideOverlays() {
-  for (const id of ['menu', 'lobby', 'resultsOv', 'staffroom']) show(id, false);
+  for (const id of ['menu', 'lobby', 'resultsOv', 'staffroom', 'locker']) show(id, false);
 }
 export function staffroom(v) { show('staffroom', v); }
 
@@ -138,6 +160,7 @@ export function showResults(title, avgLine, rows) {
 }
 
 export function setPhase(label) { $('phaseLabel').textContent = label; }
+export function topbar(v) { show('topbar', v); }
 export function setTimer(s) { $('phaseTimer').textContent = s; }
 
 export function toast(text, cls = '') {

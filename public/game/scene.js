@@ -171,6 +171,13 @@ const blobTex = texture(128, 128, (c, w, h) => {
   c.fillStyle = g; c.fillRect(0, 0, w, h);
 });
 
+const aoStripTex = texture(64, 64, (c, w, h) => {
+  const g = c.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, 'rgba(20,12,6,0.34)');
+  g.addColorStop(1, 'rgba(20,12,6,0)');
+  c.fillStyle = g; c.fillRect(0, 0, w, h);
+});
+
 // ---------------------------------------------------------------- helpers
 
 const mats = new Map();
@@ -185,6 +192,57 @@ const darkWoodMat = () => mat('#6f4526', { map: darkWoodTex, roughness: 0.6 });
 let SURFACES = [];
 function box(parent, w, h, d, c, x, y, z, opts = {}) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), opts.material || mat(c));
+  m.position.set(x, y, z);
+  if (opts.ry) m.rotation.y = opts.ry;
+  m.castShadow = !opts.noShadow; m.receiveShadow = true;
+  parent.add(m);
+  SURFACES.push(m);
+  return m;
+}
+
+// image-based lighting: a tiny synthetic "studio" baked through PMREM gives
+// every material soft realistic shading and gentle reflections
+export function setupEnvironment(renderer, scene) {
+  const env = new THREE.Scene();
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(40, 16, 12),
+    new THREE.MeshBasicMaterial({ color: '#a8b8d0', side: THREE.BackSide }));
+  env.add(sky);
+  const panel = (color, x, y, z, s) => {
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(s, s * 0.6), new THREE.MeshBasicMaterial({ color }));
+    p.position.set(x, y, z);
+    p.lookAt(0, 0, 0);
+    env.add(p);
+  };
+  panel('#ffe0b0', 25, 14, -4, 26);   // warm key (the windows)
+  panel('#cdd8ee', -22, 10, 6, 20);   // cool fill
+  panel('#8a6a48', 0, -18, 0, 30);    // floor bounce
+  const pm = new THREE.PMREMGenerator(renderer);
+  scene.environment = pm.fromScene(env, 0.06).texture;
+  scene.environmentIntensity = 0.5;
+  pm.dispose();
+}
+
+// box with softly rounded edges — reads as "manufactured", not "programmer art"
+function roundedBoxGeo(w, h, d, r = 0.035, seg = 2) {
+  const g = new THREE.BoxGeometry(w, h, d, seg, seg, seg);
+  const pos = g.attributes.position, nor = g.attributes.normal;
+  const ix = w / 2 - r, iy = h / 2 - r, iz = d / 2 - r;
+  const v = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    c.set(Math.max(-ix, Math.min(ix, v.x)), Math.max(-iy, Math.min(iy, v.y)), Math.max(-iz, Math.min(iz, v.z)));
+    v.sub(c);
+    const l = v.length();
+    if (l > 1e-6) {
+      v.divideScalar(l);
+      nor.setXYZ(i, v.x, v.y, v.z);
+      pos.setXYZ(i, c.x + v.x * r, c.y + v.y * r, c.z + v.z * r);
+    }
+  }
+  return g;
+}
+function rbox(parent, w, h, d, c, x, y, z, opts = {}) {
+  const m = new THREE.Mesh(roundedBoxGeo(w, h, d, opts.r || 0.035), opts.material || mat(c));
   m.position.set(x, y, z);
   if (opts.ry) m.rotation.y = opts.ry;
   m.castShadow = !opts.noShadow; m.receiveShadow = true;
@@ -223,6 +281,30 @@ function textSprite(text, { size = 42, w = 512, h = 128, bg = null, fg = '#fff' 
 }
 
 // ---------------------------------------------------------------- the room
+
+const MOTES = { pts: null, base: [] };
+let _invBlob = null;
+function blobTexInverted() {
+  return _invBlob || (_invBlob = texture(128, 128, (c, w, h) => {
+    const g = c.createRadialGradient(64, 64, 4, 64, 64, 62);
+    g.addColorStop(0, 'rgba(255,235,190,0.85)');
+    g.addColorStop(1, 'rgba(255,235,190,0)');
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+  }));
+}
+
+// gentle life: drifting dust, called every frame
+export function tickAmbient(t) {
+  if (!MOTES.pts) return;
+  const arr = MOTES.pts.geometry.attributes.position.array;
+  for (let i = 0; i < MOTES.base.length; i++) {
+    const [x, y, z] = MOTES.base[i];
+    arr[i * 3] = x + Math.sin(t * 0.21 + i) * 0.35;
+    arr[i * 3 + 1] = y + Math.sin(t * 0.13 + i * 2.1) * 0.3;
+    arr[i * 3 + 2] = z + Math.cos(t * 0.17 + i * 1.3) * 0.35;
+  }
+  MOTES.pts.geometry.attributes.position.needsUpdate = true;
+}
 
 export function buildRoom(scene) {
   SURFACES = [];
@@ -304,6 +386,51 @@ export function buildRoom(scene) {
     scene.add(shaft);
   }
 
+  // corner ambient occlusion strips along every wall base
+  {
+    const aoMat = new THREE.MeshBasicMaterial({ map: aoStripTex, transparent: true, depthWrite: false });
+    const strip = (w, x, z, ry) => {
+      const g = new THREE.Group();
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, 1.1), aoMat);
+      m.rotation.set(-Math.PI / 2, 0, 0);
+      m.position.set(0, 0, 0.55);
+      g.add(m);
+      g.position.set(x, 0.02, z);
+      g.rotation.y = ry;
+      scene.add(g);
+    };
+    strip(ROOM.x * 2, 0, -ROOM.z + 0.15, 0);
+    strip(ROOM.x * 2, 0, ROOM.z - 0.15, Math.PI);
+    strip(ROOM.z * 2, -ROOM.x + 0.15, 0, -Math.PI / 2);
+    strip(ROOM.z * 2, ROOM.x - 0.15, 0, Math.PI / 2);
+  }
+  // warm pools of sunlight on the floor under each window
+  for (const wz of [-4.5, 0.5, 5]) {
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 2.6),
+      new THREE.MeshBasicMaterial({ map: blobTexInverted(), transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
+    pool.rotation.x = -Math.PI / 2;
+    pool.rotation.z = 0.25;
+    pool.position.set(ROOM.x - 3.4, 0.03, wz + 0.7);
+    scene.add(pool);
+  }
+  // dust motes drifting in the light
+  {
+    const n = 140, arr = new Float32Array(n * 3);
+    MOTES.base = [];
+    for (let i = 0; i < n; i++) {
+      const p = [ROOM.x - 1.5 - Math.random() * 6.5, 0.3 + Math.random() * 3.6, (Math.random() - 0.5) * 14];
+      MOTES.base.push(p);
+      arr.set(p, i * 3);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+    MOTES.pts = new THREE.Points(g, new THREE.PointsMaterial({
+      color: '#ffe8c0', size: 0.035, transparent: true, opacity: 0.5,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    scene.add(MOTES.pts);
+  }
+
   // door (left wall)
   box(scene, 0.16, 3.1, 1.5, '#e5dfce', -ROOM.x + 0.16, 1.55, -5.5, { noShadow: true });
   box(scene, 0.12, 2.95, 1.34, null, -ROOM.x + 0.2, 1.48, -5.5, { material: darkWoodMat() });
@@ -356,7 +483,7 @@ export function buildRoom(scene) {
   blobShadow(scene, 1.3, 1.3, -ROOM.x + 1, ROOM.z - 1);
 
   // teacher desk
-  box(scene, 2.7, 0.12, 1.35, null, TEACHER_DESK.x, 0.95, TEACHER_DESK.z, { material: darkWoodMat() });
+  rbox(scene, 2.7, 0.12, 1.35, null, TEACHER_DESK.x, 0.95, TEACHER_DESK.z, { material: darkWoodMat(), r: 0.04 });
   box(scene, 2.45, 0.85, 1.12, null, TEACHER_DESK.x, 0.46, TEACHER_DESK.z, { material: darkWoodMat() });
   box(scene, 0.7, 0.16, 0.02, '#4a3018', TEACHER_DESK.x - 0.6, 0.62, TEACHER_DESK.z + 0.57);
   box(scene, 0.7, 0.16, 0.02, '#4a3018', TEACHER_DESK.x + 0.6, 0.62, TEACHER_DESK.z + 0.57);
@@ -380,14 +507,14 @@ export function buildRoom(scene) {
   const deskMat = mat('#9a6a3e', { map: deskTex, roughness: 0.6 });
   const PENCILCASE = ['#c75d4e', '#4e86c7', '#68a75e'];
   DESKS.forEach((d, i) => {
-    const top = box(scene, 1.5, 0.09, 0.95, null, d.x, 0.78, d.z, { material: deskMat });
+    const top = rbox(scene, 1.5, 0.09, 0.95, null, d.x, 0.78, d.z, { material: deskMat, r: 0.03 });
     top.userData.seat = i;
     deskMeshes.push(top);
     box(scene, 1.42, 0.1, 0.06, '#7c5230', d.x, 0.72, d.z + 0.44, { noShadow: true });
     for (const [lx, lz] of [[-0.65, -0.38], [0.65, -0.38], [-0.65, 0.38], [0.65, 0.38]])
       box(scene, 0.08, 0.75, 0.08, '#4c4c54', d.x + lx, 0.39, d.z + lz);
-    box(scene, 0.95, 0.07, 0.85, null, d.x, 0.52, d.z + 1.05, { material: deskMat });
-    box(scene, 0.95, 0.8, 0.07, null, d.x, 0.98, d.z + 1.46, { material: deskMat });
+    rbox(scene, 0.95, 0.07, 0.85, null, d.x, 0.52, d.z + 1.05, { material: deskMat, r: 0.025 });
+    rbox(scene, 0.95, 0.8, 0.07, null, d.x, 0.98, d.z + 1.46, { material: deskMat, r: 0.025 });
     for (const [lx, lz] of [[-0.4, 0.72], [0.4, 0.72], [-0.4, 1.4], [0.4, 1.4]])
       box(scene, 0.07, 0.52, 0.07, '#4c4c54', d.x + lx, 0.26, d.z + lz);
     blobShadow(scene, 2.3, 1.7, d.x, d.z + 0.2);
@@ -479,15 +606,17 @@ export function makeTrapMesh(scene, kind, pos, normal) {
 
 // ---- avatars ---------------------------------------------------------------
 
-function makeFace(head, skin) {
+function makeFace(head, skin, sleepy) {
   const eyeMat = mat('#1c1a22', { roughness: 0.3 });
+  const eyes = [];
   for (const ex of [-0.095, 0.095]) {
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), eyeMat);
     eye.position.set(ex, 0.03, -0.235);
     head.add(eye);
+    eyes.push(eye);
     const brow = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.022, 0.02), eyeMat);
-    brow.position.set(ex, 0.115, -0.235);
-    brow.rotation.z = ex < 0 ? 0.12 : -0.12;
+    brow.position.set(ex, sleepy ? 0.085 : 0.115, -0.235);
+    brow.rotation.z = (ex < 0 ? 0.12 : -0.12) * (sleepy ? -2 : 1);
     head.add(brow);
   }
   const smile = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.013, 6, 10, Math.PI * 0.8), eyeMat);
@@ -495,27 +624,28 @@ function makeFace(head, skin) {
   smile.rotation.z = Math.PI + Math.PI * 0.1;
   head.add(smile);
   head.material = mat(skin, { roughness: 0.65 });
+  return eyes;
 }
 
-function makeHair(head, colorIdx) {
-  const hm = mat(HAIR[colorIdx % HAIR.length], { roughness: 0.95 });
-  const style = colorIdx % 4;
+function makeHairStyle(head, style, color) {
+  const hm = mat(color, { roughness: 0.95 });
+  if (style === 'none') return;
   const cap = new THREE.Mesh(new THREE.SphereGeometry(0.275, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), hm);
   cap.position.set(0, 0.015, 0.03);
   cap.rotation.x = -0.25;
   head.add(cap);
-  if (style === 1) { // bun
+  if (style === 'bun') {
     const bun = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), hm);
     bun.position.set(0, 0.18, 0.2);
     head.add(bun);
-  } else if (style === 2) { // spikes
+  } else if (style === 'spikes') {
     for (const sx of [-0.1, 0, 0.1]) {
       const spike = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.14, 6), hm);
       spike.position.set(sx, 0.27, 0);
       spike.rotation.x = 0.15;
       head.add(spike);
     }
-  } else if (style === 3) { // fringe
+  } else if (style === 'fringe') {
     const fringe = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.08, 0.06), hm);
     fringe.position.set(0.03, 0.16, -0.2);
     fringe.rotation.z = -0.1;
@@ -523,47 +653,156 @@ function makeHair(head, colorIdx) {
   }
 }
 
-export function makeStudent(scene, seat, colorIdx, name) {
-  const d = DESKS[seat];
-  const g = new THREE.Group();
-  g.position.set(d.x, 0, d.z + 0.95);
+function makeAccessory(head, acc, accColor) {
+  if (!acc || acc === 'none') return;
+  const am = mat(accColor || '#c0392b', { roughness: 0.6 });
+  const dark = mat('#2a2a32', { roughness: 0.3 });
+  if (acc === 'glasses') {
+    for (const ex of [-0.095, 0.095]) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.062, 0.011, 6, 14), dark);
+      ring.position.set(ex, 0.03, -0.245);
+      head.add(ring);
+    }
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.014, 0.014), dark);
+    bridge.position.set(0, 0.045, -0.25);
+    head.add(bridge);
+  } else if (acc === 'cap') {
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.285, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.42), am);
+    dome.position.set(0, 0.05, 0.02);
+    head.add(dome);
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.03, 14, 1, false, -Math.PI * 0.55, Math.PI * 1.1), am);
+    brim.position.set(0, 0.13, -0.2);
+    head.add(brim);
+  } else if (acc === 'beanie') {
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.29, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), am);
+    dome.position.set(0, 0.04, 0);
+    dome.scale.y = 1.25;
+    head.add(dome);
+    const pom = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), mat('#f0ede0', { roughness: 0.95 }));
+    pom.position.set(0, 0.4, 0);
+    head.add(pom);
+  } else if (acc === 'mohawk') {
+    for (let i = 0; i < 5; i++) {
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.22, 6), am);
+      spike.position.set(0, 0.24, -0.16 + i * 0.09);
+      spike.rotation.x = -0.3 + i * 0.16;
+      head.add(spike);
+    }
+  } else if (acc === 'mask') {
+    const band = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.3), dark);
+    band.position.set(0, -0.07, -0.13);
+    head.add(band);
+  } else if (acc === 'antenna') {
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.22, 6), dark);
+    rod.position.set(0, 0.33, 0);
+    head.add(rod);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8),
+      mat('#ff5040', { emissive: '#ff2010', emissiveIntensity: 1.6, roughness: 0.4 }));
+    bulb.position.set(0, 0.46, 0);
+    head.add(bulb);
+  } else if (acc === 'crown') {
+    const gold = mat('#e8bc3a', { roughness: 0.25, metalness: 0.7 });
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.09, 12, 1, true), gold);
+    ring.position.set(0, 0.26, 0);
+    head.add(ring);
+    for (let i = 0; i < 5; i++) {
+      const a = i / 5 * Math.PI * 2;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.09, 5), gold);
+      spike.position.set(Math.cos(a) * 0.165, 0.34, Math.sin(a) * 0.165);
+      head.add(spike);
+    }
+  } else if (acc === 'halo') {
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.02, 8, 20),
+      mat('#ffe27a', { emissive: '#ffc830', emissiveIntensity: 1.8, roughness: 0.3 }));
+    halo.position.set(0, 0.45, 0);
+    halo.rotation.x = Math.PI / 2;
+    head.add(halo);
+  }
+}
 
-  const shirt = mat(SHIRTS[colorIdx % SHIRTS.length], { roughness: 0.8 });
+export function defaultLook(idx) {
+  return {
+    shirt: SHIRTS[idx % SHIRTS.length],
+    skin: SKINS[idx % SKINS.length],
+    hair: ['cap', 'bun', 'spikes', 'fringe'][idx % 4],
+    hairColor: HAIR[idx % HAIR.length],
+    acc: 'none',
+  };
+}
+
+// shared body used by seated students and the home-screen mannequin
+function buildPerson(g, look, { standing = false } = {}) {
+  const shirt = mat(look.shirt, { roughness: 0.8 });
   const pants = mat('#3a4152', { roughness: 0.9 });
-  const skin = SKINS[colorIdx % SKINS.length];
+  const skinM = mat(look.skin, { roughness: 0.65 });
+  const baseY = standing ? 0.35 : 0;
 
   const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.29, 0.4, 6, 14), shirt);
-  body.position.set(0, 0.94, 0);
+  body.position.set(0, baseY + 0.94, 0);
   body.scale.set(1, 1, 0.82);
   body.castShadow = true;
   g.add(body);
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.12, 10), mat(skin, { roughness: 0.65 }));
-  neck.position.set(0, 1.26, 0);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.12, 10), skinM);
+  neck.position.set(0, baseY + 1.26, 0);
   g.add(neck);
-  // thighs under the desk
-  for (const lx of [-0.14, 0.14]) {
-    const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.16, 0.5), pants);
-    thigh.position.set(lx, 0.6, -0.3);
-    g.add(thigh);
+  if (standing) {
+    for (const lx of [-0.12, 0.12]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.66, 0.19), pants);
+      leg.position.set(lx, 0.33, 0);
+      leg.castShadow = true;
+      g.add(leg);
+    }
+    for (const ax of [-0.34, 0.34]) {
+      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.42, 4, 10), shirt);
+      arm.position.set(ax, baseY + 0.92, 0);
+      arm.rotation.z = ax > 0 ? -0.14 : 0.14;
+      arm.castShadow = true;
+      g.add(arm);
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.065, 8, 8), skinM);
+      hand.position.set(ax * 1.2, baseY + 0.6, 0);
+      g.add(hand);
+    }
+  } else {
+    for (const lx of [-0.14, 0.14]) {
+      const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.16, 0.5), pants);
+      thigh.position.set(lx, 0.6, -0.3);
+      g.add(thigh);
+    }
+    for (const ax of [-0.31, 0.31]) {
+      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.34, 4, 10), shirt);
+      arm.position.set(ax, 0.96, -0.24);
+      arm.rotation.x = 1.2;
+      arm.rotation.z = ax > 0 ? -0.22 : 0.22;
+      arm.castShadow = true;
+      g.add(arm);
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), skinM);
+      hand.position.set(ax * 1.35, 0.86, -0.5);
+      g.add(hand);
+    }
   }
-  // arms reaching to the desk, with hands
-  for (const ax of [-0.31, 0.31]) {
-    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.34, 4, 10), shirt);
-    arm.position.set(ax, 0.96, -0.24);
-    arm.rotation.x = 1.2;
-    arm.rotation.z = ax > 0 ? -0.22 : 0.22;
-    arm.castShadow = true;
-    g.add(arm);
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), mat(skin, { roughness: 0.65 }));
-    hand.position.set(ax * 1.35, 0.86, -0.5);
-    g.add(hand);
-  }
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 22, 16), mat(skin, { roughness: 0.65 }));
-  head.position.set(0, 1.56, 0);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 22, 16), skinM);
+  head.position.set(0, baseY + 1.56, 0);
   head.castShadow = true;
-  makeFace(head, skin);
-  makeHair(head, colorIdx);
+  const eyes = makeFace(head, look.skin, look.sleepy);
+  makeHairStyle(head, look.hair, look.hairColor);
+  makeAccessory(head, look.acc, look.accColor);
   g.add(head);
+  return { body, head, eyes, phase: Math.random() * 7 };
+}
+
+function idleTick(parts, t) {
+  parts.body.scale.y = 1 + Math.sin(t * 1.6 + parts.phase) * 0.013;
+  parts.head.rotation.z = Math.sin(t * 0.7 + parts.phase) * 0.035;
+  const blink = ((t + parts.phase) % 3.7) < 0.13 ? 0.12 : 1;
+  for (const e of parts.eyes) e.scale.y = blink;
+}
+
+export function makeStudent(scene, seat, look, name) {
+  if (typeof look === 'number') look = defaultLook(look);
+  const d = DESKS[seat];
+  const g = new THREE.Group();
+  g.position.set(d.x, 0, d.z + 0.95);
+  const parts = buildPerson(g, look);
   blobShadow(g, 1.1, 1.1, 0, 0, 0.85);
 
   const tag = textSprite(name, { size: 44, bg: 'rgba(12,12,22,0.5)' });
@@ -573,7 +812,7 @@ export function makeStudent(scene, seat, colorIdx, name) {
   scene.add(g);
 
   return {
-    group: g, head, body, seat,
+    group: g, head: parts.head, body: parts.body, seat,
     setLean(l) { g.position.x = d.x + l * 0.55; g.rotation.z = -l * 0.18; },
     setPos(x, z, yaw) { g.position.x = x; g.position.z = z; g.rotation.y = yaw; g.rotation.z = 0; },
     resetSeat() { g.position.set(d.x, 0, d.z + 0.95); g.rotation.set(0, 0, 0); },
@@ -585,6 +824,7 @@ export function makeStudent(scene, seat, colorIdx, name) {
       gesture.until = now + dur;
     },
     tick(now) {
+      idleTick(parts, now);
       if (gesture.sprite && now > gesture.until) { g.remove(gesture.sprite); gesture.sprite = null; }
     },
     moveToStool() {
@@ -596,53 +836,38 @@ export function makeStudent(scene, seat, colorIdx, name) {
   };
 }
 
+// the home-screen mannequin showing your equipped skin
+export function makeMannequin(scene, look, name) {
+  const g = new THREE.Group();
+  g.position.set(0, 0, 1.2);
+  const parts = buildPerson(g, look, { standing: true });
+  blobShadow(g, 1.2, 1.2, 0, 0, 0.9);
+  if (name) {
+    const tag = textSprite(name, { size: 44, bg: 'rgba(12,12,22,0.5)' });
+    tag.position.set(0, 2.55, 0);
+    g.add(tag);
+  }
+  scene.add(g);
+  return {
+    group: g,
+    tick(now) { idleTick(parts, now); g.rotation.y = Math.sin(now * 0.4) * 0.5 + Math.PI * 0.1; },
+    dispose() { scene.remove(g); },
+  };
+}
+
 export function makeTeacher(scene, name) {
   const g = new THREE.Group();
-  const suit = mat('#3e3e50', { roughness: 0.85 });
-  const skin = '#e8bd96';
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, 0.7, 6, 14), suit);
-  body.position.set(0, 1.06, 0);
-  body.scale.set(1, 1, 0.85);
-  body.castShadow = true;
-  g.add(body);
-  for (const ax of [-0.37, 0.37]) {
-    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.5, 4, 10), suit);
-    arm.position.set(ax, 1.02, 0);
-    arm.rotation.z = ax > 0 ? -0.1 : 0.1;
-    arm.castShadow = true;
-    g.add(arm);
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), mat(skin, { roughness: 0.65 }));
-    hand.position.set(ax * 1.15, 0.68, 0);
-    g.add(hand);
-  }
-  for (const lx of [-0.13, 0.13]) {
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.62, 0.2), mat('#2c2c3a', { roughness: 0.9 }));
-    leg.position.set(lx, 0.31, 0);
-    g.add(leg);
-  }
+  const look = { shirt: '#3e3e50', skin: '#e8bd96', hair: 'none', acc: 'none' };
+  const parts = buildPerson(g, look, { standing: true });
+  const head = parts.head;
+  head.position.y = 1.94;
+  parts.body.position.y = 1.06;
+  parts.body.scale.set(1.05, 1.15, 0.88);
   const tie = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.42, 0.03), mat('#a83a30'));
   tie.position.set(0, 1.3, -0.29);
   tie.rotation.x = 0.08;
   g.add(tie);
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.1, 10), mat(skin, { roughness: 0.65 }));
-  neck.position.set(0, 1.62, 0);
-  g.add(neck);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 22, 16), mat(skin, { roughness: 0.65 }));
-  head.position.set(0, 1.94, 0);
-  head.castShadow = true;
-  makeFace(head, skin);
-  // stern: flatten the smile into a frown
-  head.children[head.children.length - 1].rotation.z = Math.PI * 0.1;
-  // glasses
-  const gm = mat('#2a2a32', { roughness: 0.3 });
-  for (const ex of [-0.095, 0.095]) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.062, 0.011, 6, 14), gm);
-    ring.position.set(ex, 0.03, -0.245);
-    head.add(ring);
-  }
-  const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.014, 0.014), gm);
-  bridge.position.set(0, 0.045, -0.25);
-  head.add(bridge);
+  makeAccessory(head, 'glasses');
   const hair = new THREE.Mesh(new THREE.SphereGeometry(0.285, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.4), mat('#9c9ca4', { roughness: 0.95 }));
   hair.position.set(0, 0.03, 0.05);
   hair.rotation.x = -0.3;
@@ -650,7 +875,6 @@ export function makeTeacher(scene, name) {
   const stache = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.045, 0.04), mat('#8a8a92'));
   stache.position.set(0, -0.06, -0.25);
   head.add(stache);
-  g.add(head);
   blobShadow(g, 1.1, 1.1, 0, 0, 0.9);
 
   const tag = textSprite('🧑‍🏫 ' + name, { size: 44, bg: 'rgba(120,30,30,0.65)' });
@@ -660,7 +884,7 @@ export function makeTeacher(scene, name) {
   g.position.set(0, 0, -5.5);
   scene.add(g);
   return {
-    group: g, head, body,
+    group: g, head, body: parts.body,
     setPose(x, z, yaw) { g.position.x = x; g.position.z = z; g.rotation.y = yaw; },
     setGesture(text, dur, now, bg = 'rgba(120,30,30,0.85)') {
       if (gesture.sprite) g.remove(gesture.sprite);
@@ -670,6 +894,7 @@ export function makeTeacher(scene, name) {
       gesture.until = now + dur;
     },
     tick(now) {
+      idleTick(parts, now);
       if (gesture.sprite && now > gesture.until) { g.remove(gesture.sprite); gesture.sprite = null; }
     },
   };
