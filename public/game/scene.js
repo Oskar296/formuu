@@ -938,7 +938,7 @@ export function makeMannequin(scene, look, name) {
   scene.add(g);
   return {
     group: g,
-    tick(now) { idleTick(parts, now); g.rotation.y = Math.sin(now * 0.4) * 0.5 + Math.PI * 0.1; },
+    tick(now) { idleTick(parts, now); g.rotation.y = Math.PI + Math.sin(now * 0.4) * 0.45; },
     dispose() { scene.remove(g); },
   };
 }
