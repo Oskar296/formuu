@@ -795,27 +795,18 @@ function makeAccessory(head, acc, accColor) {
   }
 }
 
-// A detailed hand: soft palm + four articulated fingers + an angled thumb, with
-// a shirt cuff. Points down from the wrist so it hangs naturally off the arm.
+// A simple rounded mitten hand (no fingers) in the hide-&-seek / Fall Guys idiom:
+// a soft oval nub with a small thumb bump and a shirt cuff. Toon outline included.
 function makeHand(skinM, shirtM, side) {
   const g = new THREE.Group();
   const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.055, 0.06, 12), shirtM);
   cuff.position.set(0, 0.03, 0); g.add(cuff);
-  const palm = new THREE.Mesh(new THREE.SphereGeometry(0.052, 12, 10), skinM);
-  palm.scale.set(1, 1.15, 0.62); palm.position.set(0, -0.055, 0);
-  outline(palm, 1.06); g.add(palm);
-  const knuck = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), skinM);
-  knuck.scale.set(1.1, 0.5, 0.6); knuck.position.set(0, -0.09, -0.01); g.add(knuck);
-  const fx = [-0.032, -0.011, 0.011, 0.032], flen = [0.05, 0.06, 0.056, 0.044];
-  fx.forEach((x, i) => {
-    const f = new THREE.Mesh(new THREE.CapsuleGeometry(0.0135, flen[i], 3, 6), skinM);
-    f.position.set(x, -0.135, 0); f.rotation.x = 0.35; g.add(f);
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 6), skinM);
-    tip.position.set(x, -0.135 - flen[i] / 2 - 0.01, 0.02); g.add(tip);
-  });
-  const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.016, 0.045, 3, 6), skinM);
-  thumb.position.set(side * 0.05, -0.075, 0.015); thumb.rotation.z = side * 0.85; thumb.rotation.x = 0.4;
-  g.add(thumb);
+  const mitt = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 14), skinM);
+  mitt.scale.set(0.95, 1.28, 0.74); mitt.position.set(0, -0.085, 0);
+  mitt.castShadow = true; outline(mitt, 1.05); g.add(mitt);
+  const thumb = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 10), skinM);
+  thumb.scale.set(0.9, 1.2, 0.9); thumb.position.set(side * 0.055, -0.055, 0.015);
+  outline(thumb, 1.06); g.add(thumb);
   return g;
 }
 
