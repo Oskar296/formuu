@@ -734,6 +734,13 @@ function makeAccessory(head, acc, accColor) {
     const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.014, 0.014), dark);
     bridge.position.set(0, 0.05, -0.24);
     head.add(bridge);
+    // temple arms running back toward the ears
+    for (const ex of [-1, 1]) {
+      const temple = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.012, 0.2), dark);
+      temple.position.set(ex * 0.17, 0.05, -0.08);
+      temple.rotation.y = ex * 0.28;
+      head.add(temple);
+    }
   } else if (acc === 'cap') {
     const dome = new THREE.Mesh(new THREE.SphereGeometry(0.295, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.42), am);
     dome.position.set(0, 0.06, 0.02);
@@ -785,6 +792,73 @@ function makeAccessory(head, acc, accColor) {
     halo.position.set(0, 0.46, 0);
     halo.rotation.x = Math.PI / 2;
     head.add(halo);
+  }
+}
+
+// A detailed hand: soft palm + four articulated fingers + an angled thumb, with
+// a shirt cuff. Points down from the wrist so it hangs naturally off the arm.
+function makeHand(skinM, shirtM, side) {
+  const g = new THREE.Group();
+  const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.055, 0.06, 12), shirtM);
+  cuff.position.set(0, 0.03, 0); g.add(cuff);
+  const palm = new THREE.Mesh(new THREE.SphereGeometry(0.052, 12, 10), skinM);
+  palm.scale.set(1, 1.15, 0.62); palm.position.set(0, -0.055, 0);
+  outline(palm, 1.06); g.add(palm);
+  const knuck = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), skinM);
+  knuck.scale.set(1.1, 0.5, 0.6); knuck.position.set(0, -0.09, -0.01); g.add(knuck);
+  const fx = [-0.032, -0.011, 0.011, 0.032], flen = [0.05, 0.06, 0.056, 0.044];
+  fx.forEach((x, i) => {
+    const f = new THREE.Mesh(new THREE.CapsuleGeometry(0.0135, flen[i], 3, 6), skinM);
+    f.position.set(x, -0.135, 0); f.rotation.x = 0.35; g.add(f);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 6), skinM);
+    tip.position.set(x, -0.135 - flen[i] / 2 - 0.01, 0.02); g.add(tip);
+  });
+  const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.016, 0.045, 3, 6), skinM);
+  thumb.position.set(side * 0.05, -0.075, 0.015); thumb.rotation.z = side * 0.85; thumb.rotation.x = 0.4;
+  g.add(thumb);
+  return g;
+}
+
+// A proper shoe: rubber sole, leather upper, rounded toe cap, tongue + heel.
+function makeShoe() {
+  const g = new THREE.Group();
+  const leather = mat('#241f28', { roughness: 0.42 });
+  const sole = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.28), mat('#14111a', { roughness: 0.6 }));
+  sole.position.set(0, -0.02, -0.03); g.add(sole);
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.076, 12, 10), leather);
+  body.scale.set(1, 0.95, 1.7); body.position.set(0, 0.03, -0.02); outline(body, 1.05); g.add(body);
+  const toe = new THREE.Mesh(new THREE.SphereGeometry(0.058, 12, 10), leather);
+  toe.scale.set(1, 0.82, 1.0); toe.position.set(0, 0.015, -0.15); g.add(toe);
+  const tongue = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.055, 0.05), leather);
+  tongue.position.set(0, 0.075, 0.04); g.add(tongue);
+  for (const ly of [0.05, 0.09]) {                 // laces
+    const lace = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.008, 0.008), mat('#d8d2c4', { roughness: 0.8 }));
+    lace.position.set(0, ly, -0.01); g.add(lace);
+  }
+  return g;
+}
+
+// A balding grey horseshoe: two staggered rows of tufts around the sides and
+// back, sideburns by the ears, crown left bald. ~35 little shapes.
+function makeTeacherHair(head) {
+  const grey = mat('#a9a9b2', { roughness: 0.95 }), greyD = mat('#8c8c96', { roughness: 0.95 });
+  for (let i = 0; i < 22; i++) {
+    const a = (i / 22) * Math.PI * 2;
+    if (Math.sin(a) < -0.35) continue;             // skip the bald forehead/front
+    const tuft = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 7), i % 2 ? grey : greyD);
+    tuft.scale.set(1.15, 1.35, 1.0);
+    tuft.position.set(Math.cos(a) * 0.255, 0.015 + rnd() * 0.05, Math.sin(a) * 0.255);
+    head.add(tuft);
+  }
+  for (let i = 0; i < 11; i++) {                    // higher wisps at the back
+    const a = Math.PI * 0.28 + (i / 11) * Math.PI * 1.44;
+    const tuft = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), grey);
+    tuft.scale.set(1, 0.8, 1); tuft.position.set(Math.cos(a) * 0.225, 0.12 + rnd() * 0.03, Math.sin(a) * 0.225);
+    head.add(tuft);
+  }
+  for (const sx of [-1, 1]) {                        // sideburns
+    const sb = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.1, 0.06), greyD);
+    sb.position.set(sx * 0.25, -0.03, -0.03); head.add(sb);
   }
 }
 
@@ -843,8 +917,8 @@ function buildStanding(g, look, shirt, pants, skinM) {
     const knee = new THREE.Group(); knee.position.set(0, -0.42, 0); hip.add(knee);
     const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.26, 4, 10), pants);
     shin.position.set(0, -0.17, 0); shin.castShadow = true; outline(shin, 1.05); knee.add(shin);
-    const shoe = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), mat('#2a2430', { roughness: 0.5 }));
-    shoe.position.set(0, -0.35, -0.05); shoe.scale.set(1, 0.62, 1.6); knee.add(shoe);
+    const shoe = makeShoe();
+    shoe.position.set(0, -0.33, 0); knee.add(shoe);
     joints.legs.push({ hip, knee, side });
   }
   // arms: shoulder pivot -> upper -> elbow pivot -> forearm + hand (all connected)
@@ -855,8 +929,8 @@ function buildStanding(g, look, shirt, pants, skinM) {
     const el = new THREE.Group(); el.position.set(0, -0.36, 0); sh.add(el);
     const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.24, 4, 10), skinM);
     fore.position.set(0, -0.15, 0); outline(fore, 1.05); el.add(fore);
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.076, 10, 8), skinM);
-    hand.position.set(0, -0.32, 0); el.add(hand);
+    const hand = makeHand(skinM, shirt, side);
+    hand.position.set(0, -0.30, 0); el.add(hand);
     joints.arms.push({ sh, el, side, rest: side * 0.09 });
   }
   return { body, head, eyes, joints, standing: true, phase: Math.random() * 7, walk: 0, prev: null };
@@ -1003,12 +1077,31 @@ export function makeTeacher(scene, name) {
   const head = parts.head;
   // teacher features layered onto the head/torso
   makeAccessory(head, 'glasses');
-  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.285, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.42), mat('#9c9ca4', { roughness: 0.95 }));
-  hair.position.set(0, 0.05, 0.03); hair.rotation.x = -0.3; head.add(hair);
-  const stache = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.045, 0.04), mat('#8a8a92'));
-  stache.position.set(0, -0.085, -0.245); head.add(stache);
-  const tie = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.4, 0.03), mat('#a83a30'));
-  tie.position.set(0, 1.16, -0.26); tie.rotation.x = 0.06; g.add(tie);
+  makeTeacherHair(head);
+  const stache = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.04, 0.03), mat('#8a8a92'));
+  for (const sx of [-1, 1]) { const h = stache.clone(); h.position.set(sx * 0.04, -0.085, -0.245); h.rotation.z = sx * 0.15; head.add(h); }
+  // shirt collar + buttons + tie (knot + blade) + belt
+  const shirtWhite = mat('#e6e6ea', { roughness: 0.8 });
+  for (const sx of [-1, 1]) {
+    const col = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.11, 0.02), shirtWhite);
+    col.position.set(sx * 0.07, 1.34, -0.24); col.rotation.z = sx * 0.5; col.rotation.x = 0.1; g.add(col);
+  }
+  const placket = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.42, 0.02), shirtWhite);
+  placket.position.set(0, 1.12, -0.255); g.add(placket);
+  for (let i = 0; i < 3; i++) {
+    const btn = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.01, 8), mat('#cfcfd6'));
+    btn.rotation.x = Math.PI / 2; btn.position.set(0, 1.22 - i * 0.12, -0.27); g.add(btn);
+  }
+  const knot = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.03), mat('#8f2f26'));
+  knot.position.set(0, 1.34, -0.265); g.add(knot);
+  const tie = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.36, 0.025), mat('#a83a30'));
+  tie.position.set(0, 1.12, -0.265); tie.rotation.x = 0.05; g.add(tie);
+  const tieTip = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.08, 4), mat('#a83a30'));
+  tieTip.position.set(0, 0.93, -0.26); tieTip.rotation.x = Math.PI; g.add(tieTip);
+  const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.06, 20, 1, true), mat('#2a2028', { roughness: 0.5 }));
+  belt.position.set(0, 0.86, 0); belt.scale.set(1, 1, 0.86); g.add(belt);
+  const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 0.02), mat('#c8b048', { metalness: 0.6, roughness: 0.3 }));
+  buckle.position.set(0, 0.86, -0.235); g.add(buckle);
   g.scale.setScalar(1.06);                                  // teachers stand a touch taller
   blobShadow(g, 1.1, 1.1, 0, 0, 0.9);
 
