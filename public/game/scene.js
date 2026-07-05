@@ -788,76 +788,18 @@ function makeAccessory(head, acc, accColor) {
   }
 }
 
-// shared body used by seated students and the home-screen mannequin
+// shared body used by seated students, the standing teacher, and the mannequin
 function buildPerson(g, look, { standing = false } = {}) {
   const shirt = shirtMat(look.shirt);
   const pants = mat('#39404f', { roughness: 0.9 });
   const skinM = mat(look.skin, { roughness: 0.6 });
-  const baseY = standing ? 0.35 : 0;
+  return standing ? buildStanding(g, look, shirt, pants, skinM)
+                  : buildSeated(g, look, shirt, pants, skinM);
+}
 
-  const body = new THREE.Mesh(torsoGeo(), shirt);
-  body.position.set(0, baseY + 0.58, 0);
-  body.scale.set(1, 1, 0.85);
-  body.castShadow = true;
-  outline(body);
-  g.add(body);
-  // collar
-  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.032, 8, 16), mat(shade(look.shirt, -22), { roughness: 0.85 }));
-  collar.position.set(0, baseY + 1.285, 0);
-  collar.rotation.x = Math.PI / 2;
-  g.add(collar);
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.1, 0.14, 10), skinM);
-  neck.position.set(0, baseY + 1.3, 0);
-  g.add(neck);
-
-  if (standing) {
-    for (const lx of [-0.12, 0.12]) {
-      const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.5, 4, 10), pants);
-      leg.position.set(lx, 0.33, 0);
-      leg.castShadow = true;
-      g.add(leg);
-      const shoe = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), mat('#2a2430', { roughness: 0.5 }));
-      shoe.position.set(lx, 0.06, -0.05);
-      shoe.scale.set(1, 0.6, 1.5);
-      g.add(shoe);
-    }
-    for (const ax of [-0.33, 0.33]) {
-      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.42, 4, 10), shirt);
-      arm.position.set(ax, baseY + 0.94, 0);
-      arm.rotation.z = ax > 0 ? -0.16 : 0.16;
-      arm.castShadow = true;
-      g.add(arm);
-      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.065, 8, 8), skinM);
-      hand.position.set(ax * 1.25, baseY + 0.62, 0);
-      g.add(hand);
-    }
-  } else {
-    for (const lx of [-0.14, 0.14]) {
-      const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.36, 4, 10), pants);
-      thigh.position.set(lx, 0.6, -0.28);
-      thigh.rotation.x = Math.PI / 2;
-      g.add(thigh);
-    }
-    for (const ax of [-0.3, 0.3]) {
-      // upper arm angled down-forward, forearm to the desk, hand on top
-      const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.22, 4, 10), shirt);
-      upper.position.set(ax, baseY + 1.05, -0.1);
-      upper.rotation.x = 0.7;
-      upper.rotation.z = ax > 0 ? -0.3 : 0.3;
-      upper.castShadow = true;
-      g.add(upper);
-      const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.22, 4, 10), skinM);
-      fore.position.set(ax * 1.25, baseY + 0.92, -0.36);
-      fore.rotation.x = 1.35;
-      fore.rotation.z = ax > 0 ? -0.15 : 0.15;
-      g.add(fore);
-      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.068, 8, 8), skinM);
-      hand.position.set(ax * 1.3, baseY + 0.86, -0.5);
-      g.add(hand);
-    }
-  }
+function addHead(g, look, skinM, y) {
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 24, 18), skinM);
-  head.position.set(0, baseY + 1.6, 0);
+  head.position.set(0, y, 0);
   head.scale.set(1, 1.06, 0.98);
   head.castShadow = true;
   outline(head, 1.05);
@@ -865,14 +807,125 @@ function buildPerson(g, look, { standing = false } = {}) {
   makeHairStyle(head, look.hair, look.hairColor);
   makeAccessory(head, look.acc, look.accColor);
   g.add(head);
-  return { body, head, eyes, phase: Math.random() * 7 };
+  return { head, eyes };
+}
+
+// Standing body built as a CONNECTED hierarchy: torso + pelvis bridge the legs,
+// limbs hang from hip/shoulder pivot groups so nothing floats — and the pivots
+// let the figure actually walk (see walkTick).
+function buildStanding(g, look, shirt, pants, skinM) {
+  const joints = { legs: [], arms: [] };
+  const HIP_Y = 0.86, TORSO_Y = 0.78, SHOULDER_Y = 1.42;
+
+  const body = new THREE.Mesh(torsoGeo(), shirt);
+  body.position.set(0, TORSO_Y, 0);
+  body.scale.set(1, 1.02, 0.85);
+  body.castShadow = true;
+  outline(body);
+  g.add(body);
+  // pelvis sits inside the torso base and over the hips so there is no gap
+  const pelvis = new THREE.Mesh(new THREE.SphereGeometry(0.27, 16, 12), pants);
+  pelvis.position.set(0, HIP_Y, 0);
+  pelvis.scale.set(1, 0.72, 0.86);
+  g.add(pelvis);
+
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.033, 8, 16), mat(shade(look.shirt, -22), { roughness: 0.85 }));
+  collar.position.set(0, 1.47, 0); collar.rotation.x = Math.PI / 2; g.add(collar);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.18, 12), skinM);
+  neck.position.set(0, 1.46, 0); g.add(neck);
+  const { head, eyes } = addHead(g, look, skinM, 1.75);
+
+  // legs: hip pivot -> thigh -> knee pivot -> shin + shoe, reaching the floor
+  for (const side of [-1, 1]) {
+    const hip = new THREE.Group(); hip.position.set(side * 0.12, HIP_Y, 0); g.add(hip);
+    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.095, 0.30, 4, 10), pants);
+    thigh.position.set(0, -0.20, 0); thigh.castShadow = true; outline(thigh, 1.05); hip.add(thigh);
+    const knee = new THREE.Group(); knee.position.set(0, -0.42, 0); hip.add(knee);
+    const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.26, 4, 10), pants);
+    shin.position.set(0, -0.17, 0); shin.castShadow = true; outline(shin, 1.05); knee.add(shin);
+    const shoe = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), mat('#2a2430', { roughness: 0.5 }));
+    shoe.position.set(0, -0.35, -0.05); shoe.scale.set(1, 0.62, 1.6); knee.add(shoe);
+    joints.legs.push({ hip, knee, side });
+  }
+  // arms: shoulder pivot -> upper -> elbow pivot -> forearm + hand (all connected)
+  for (const side of [-1, 1]) {
+    const sh = new THREE.Group(); sh.position.set(side * 0.245, SHOULDER_Y, 0); sh.rotation.z = side * 0.09; g.add(sh);
+    const up = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.28, 4, 10), shirt);
+    up.position.set(0, -0.18, 0); up.castShadow = true; outline(up, 1.05); sh.add(up);
+    const el = new THREE.Group(); el.position.set(0, -0.36, 0); sh.add(el);
+    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.24, 4, 10), skinM);
+    fore.position.set(0, -0.15, 0); outline(fore, 1.05); el.add(fore);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.076, 10, 8), skinM);
+    hand.position.set(0, -0.32, 0); el.add(hand);
+    joints.arms.push({ sh, el, side, rest: side * 0.09 });
+  }
+  return { body, head, eyes, joints, standing: true, phase: Math.random() * 7, walk: 0, prev: null };
+}
+
+// Seated body used by students at desks (unchanged proportions — legs tuck under
+// the desk, arms rest forward on the paper).
+function buildSeated(g, look, shirt, pants, skinM) {
+  const body = new THREE.Mesh(torsoGeo(), shirt);
+  body.position.set(0, 0.58, 0);
+  body.scale.set(1, 1, 0.85);
+  body.castShadow = true;
+  outline(body);
+  g.add(body);
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.032, 8, 16), mat(shade(look.shirt, -22), { roughness: 0.85 }));
+  collar.position.set(0, 1.285, 0); collar.rotation.x = Math.PI / 2; g.add(collar);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.1, 0.14, 10), skinM);
+  neck.position.set(0, 1.3, 0); g.add(neck);
+  for (const lx of [-0.14, 0.14]) {
+    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.36, 4, 10), pants);
+    thigh.position.set(lx, 0.6, -0.28); thigh.rotation.x = Math.PI / 2; g.add(thigh);
+  }
+  for (const ax of [-0.3, 0.3]) {
+    const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.22, 4, 10), shirt);
+    upper.position.set(ax, 1.05, -0.1); upper.rotation.x = 0.7; upper.rotation.z = ax > 0 ? -0.3 : 0.3;
+    upper.castShadow = true; g.add(upper);
+    // elbow pivot carries the forearm + hand so the hand never floats off
+    const elbow = new THREE.Group();
+    elbow.position.set(ax * 1.18, 0.95, -0.24); elbow.rotation.x = 1.35; elbow.rotation.z = ax > 0 ? -0.15 : 0.15;
+    g.add(elbow);
+    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.22, 4, 10), skinM);
+    fore.position.set(0, -0.13, 0); elbow.add(fore);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.068, 8, 8), skinM);
+    hand.position.set(0, -0.27, 0); elbow.add(hand);
+  }
+  const { head, eyes } = addHead(g, look, skinM, 1.6);
+  return { body, head, eyes, joints: {}, phase: Math.random() * 7 };
 }
 
 function idleTick(parts, t) {
-  parts.body.scale.y = 1 + Math.sin(t * 1.6 + parts.phase) * 0.013;
+  parts.body.scale.y = (parts.standing ? 1.02 : 1) + Math.sin(t * 1.6 + parts.phase) * 0.013;
   parts.head.rotation.z = Math.sin(t * 0.7 + parts.phase) * 0.035;
   const blink = ((t + parts.phase) % 3.7) < 0.13 ? 0.12 : 1;
   for (const e of parts.eyes) e.scale.y = blink;
+}
+
+// Animate a walk from a speed (world units/sec). Legs swing from the hips with a
+// knee bend on the back-swing; arms counter-swing; a gentle body bob sells the
+// weight. Eases back to a clean stand when speed ~ 0.
+function walkTick(parts, speed, t) {
+  const J = parts.joints;
+  if (!J || !J.legs) return;
+  const moving = speed > 0.05;
+  const amp = Math.min(1, speed / 1.6);
+  parts.walk += (moving ? speed : 0) * 6.2 * 0.016;
+  const ph = parts.walk;
+  for (const L of J.legs) {
+    const s = L.side > 0 ? Math.PI : 0;
+    const swing = moving ? Math.sin(ph + s) * 0.62 * amp : 0;
+    const bend = moving ? Math.max(0, -Math.sin(ph + s)) * 1.0 * amp : 0;
+    L.hip.rotation.x += (swing - L.hip.rotation.x) * 0.3;
+    L.knee.rotation.x += (bend - L.knee.rotation.x) * 0.3;
+  }
+  for (const A of J.arms) {
+    const s = A.side > 0 ? 0 : Math.PI;
+    const swing = moving ? Math.sin(ph + s) * 0.5 * amp : 0;
+    A.sh.rotation.x += (swing - A.sh.rotation.x) * 0.25;
+    A.el.rotation.x += ((moving ? 0.35 * amp : 0) - A.el.rotation.x) * 0.2;
+  }
 }
 
 export function defaultLook(idx) {
@@ -946,34 +999,31 @@ export function makeMannequin(scene, look, name) {
 export function makeTeacher(scene, name) {
   const g = new THREE.Group();
   const look = { shirt: '#3e3e50', skin: '#e8bd96', hair: 'none', acc: 'none' };
-  const parts = buildPerson(g, look, { standing: true });
+  const parts = buildPerson(g, look, { standing: true });   // connected, walkable body
   const head = parts.head;
-  head.position.y = 1.94;
-  parts.body.position.y = 1.06;
-  parts.body.scale.set(1.05, 1.15, 0.88);
-  const tie = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.42, 0.03), mat('#a83a30'));
-  tie.position.set(0, 1.3, -0.29);
-  tie.rotation.x = 0.08;
-  g.add(tie);
+  // teacher features layered onto the head/torso
   makeAccessory(head, 'glasses');
-  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.285, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.4), mat('#9c9ca4', { roughness: 0.95 }));
-  hair.position.set(0, 0.03, 0.05);
-  hair.rotation.x = -0.3;
-  head.add(hair);
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.285, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.42), mat('#9c9ca4', { roughness: 0.95 }));
+  hair.position.set(0, 0.05, 0.03); hair.rotation.x = -0.3; head.add(hair);
   const stache = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.045, 0.04), mat('#8a8a92'));
-  stache.position.set(0, -0.06, -0.25);
-  head.add(stache);
+  stache.position.set(0, -0.085, -0.245); head.add(stache);
+  const tie = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.4, 0.03), mat('#a83a30'));
+  tie.position.set(0, 1.16, -0.26); tie.rotation.x = 0.06; g.add(tie);
+  g.scale.setScalar(1.06);                                  // teachers stand a touch taller
   blobShadow(g, 1.1, 1.1, 0, 0, 0.9);
 
   const tag = textSprite('🧑‍🏫 ' + name, { size: 44, bg: 'rgba(120,30,30,0.65)' });
-  tag.position.set(0, 2.55, 0);
+  tag.position.set(0, 2.5, 0);
   g.add(tag);
   const gesture = { sprite: null, until: 0 };
   g.position.set(0, 0, -5.5);
   scene.add(g);
+
+  // derive walk speed from how far setPose moves us between frames
+  let curX = 0, curZ = 0, pX = null, pZ = null, pT = null;
   return {
     group: g, head, body: parts.body,
-    setPose(x, z, yaw) { g.position.x = x; g.position.z = z; g.rotation.y = yaw; },
+    setPose(x, z, yaw) { g.position.x = x; g.position.z = z; g.rotation.y = yaw; curX = x; curZ = z; },
     setGesture(text, dur, now, bg = 'rgba(120,30,30,0.85)') {
       if (gesture.sprite) g.remove(gesture.sprite);
       gesture.sprite = textSprite(text, { size: 52, bg });
@@ -983,6 +1033,10 @@ export function makeTeacher(scene, name) {
     },
     tick(now) {
       idleTick(parts, now);
+      let speed = 0;
+      if (pX != null) { const dt = Math.max(0.001, now - pT); speed = Math.hypot(curX - pX, curZ - pZ) / dt; }
+      pX = curX; pZ = curZ; pT = now;
+      walkTick(parts, speed, now);
       if (gesture.sprite && now > gesture.until) { g.remove(gesture.sprite); gesture.sprite = null; }
     },
   };
