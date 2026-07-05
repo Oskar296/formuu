@@ -35,11 +35,24 @@ class BaseNet {
     this.emit(ev);
     return ev;
   }
+  // emit an event as if it came from another participant (used to drive bots
+  // in solo mode — the host simulates them through the same event pipeline).
+  sendAs(fromId, type, data) {
+    const ev = { type, data, from: fromId, t: Date.now() };
+    this.emit(ev);
+    return ev;
+  }
 }
 
 export class LocalNet extends BaseNet {
   async join(_code, name, role, skin) {
     this.roster = [{ id: this.id, name, role, skin, joinedAt: Date.now() }];
+    this.emitRoster();
+  }
+  // add AI participants to the roster (solo vs bots). The human joined first,
+  // so isHost() stays true for the human and they simulate the bots.
+  addBots(bots) {
+    for (const b of bots) this.roster.push(b);
     this.emitRoster();
   }
   send(type, data) { this.loopback(type, data); }

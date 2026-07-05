@@ -10,6 +10,7 @@ export function init(cb) {
   let role = 'student';
   $('roleStudent').onclick = () => { role = 'student'; $('roleStudent').classList.add('sel'); $('roleTeacher').classList.remove('sel'); };
   $('roleTeacher').onclick = () => { role = 'teacher'; $('roleTeacher').classList.add('sel'); $('roleStudent').classList.remove('sel'); };
+  $('btnSolo').onclick = () => CB.onSolo($('nameInput').value.trim() || (role === 'teacher' ? 'Teacher' : 'Student'), role);
   $('btnCreate').onclick = () => CB.onCreate($('nameInput').value.trim() || 'Student', role);
   $('btnJoin').onclick = () => CB.onJoin($('nameInput').value.trim() || 'Student', role, $('codeInput').value.trim().toUpperCase());
   $('btnStart').onclick = () => CB.onStart();

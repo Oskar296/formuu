@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { buildRoom, makeStudent, makeTeacher, flyNote, tickFlights, makeNoteMesh, makeTrapMesh,
   DESKS, seatAdjacent, BOARD_ZONE, TEACHER_DESK, ROOM } from './scene.js';
 import { generateExam, dealKnowledge, score, N_QUESTIONS } from './exam.js';
-import { makeNet, onlineAvailable } from './net.js';
+import { makeNet, onlineAvailable, makeId } from './net.js';
 import * as hud from './hud.js';
 import { makePost } from './postfx.js';
 import { setupEnvironment, tickAmbient, makeMannequin } from './scene.js';
@@ -174,6 +174,116 @@ async function join(create, name, role, code) {
   if (!S.lastStart) {
     S.phase = 'lobby';
     refreshLobby();
+  }
+}
+
+// ---------------------------------------------------------------- solo vs bots
+
+const BOT_NAMES = ['Mia', 'Leo', 'Ava', 'Max', 'Zoe', 'Sam', 'Ivy', 'Kai', 'Nia', 'Ben', 'Uma', 'Rex'];
+const BOT_SKINS = ['newkid', 'sunny', 'nerd', 'skater', 'capkid', 'punk', 'ninja', 'zombie', 'angel'];
+
+async function joinSolo(name, role) {
+  sounds.resume();
+  S.code = 'SOLO';
+  S.myName = name; S.myRole = role; profile.name = name;
+  S.net = makeNet('local');
+  S.myId = S.net.id;
+  S.net.onEvent(onEvent);
+  S.net.onRoster(r => { S.roster = r; if (S.phase === 'lobby') refreshLobby(); });
+  await S.net.join(S.code, name, role, profile.equipped);
+
+  const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
+  const bots = [];
+  const mk = (nm, rl, i) => ({ id: 'bot-' + makeId(), name: nm, role: rl, skin: BOT_SKINS[i % BOT_SKINS.length], joinedAt: Date.now() + 1 + i });
+  if (role === 'teacher') {
+    for (let i = 0; i < 9; i++) bots.push(mk(names[i], 'student', i));   // 9 student bots
+  } else {
+    bots.push(mk('Mr Hoblin', 'teacher', 0));                            // 1 AI teacher
+    for (let i = 0; i < 8; i++) bots.push(mk(names[i], 'student', i + 1)); // 8 classmate bots
+  }
+  S.botIds = new Set(bots.map(b => b.id));
+  S.net.addBots(bots);
+  hud.toast(role === 'teacher' ? '🧑‍🏫 A class of bots files in…' : '🤖 AI teacher + classmate bots ready…', 'gold');
+  setTimeout(() => hostStart(), 120);
+}
+
+// waypoints the AI teacher patrols (front row + aisles), from the desk layout
+function teacherWaypoints() {
+  const xs = DESKS.map(d => d.x), zs = DESKS.map(d => d.z);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
+  const front = minZ - 1.3, mid = (minZ + maxZ) / 2, back = maxZ + 0.6;
+  return [
+    { x: minX - 0.7, z: front }, { x: maxX + 0.7, z: front },
+    { x: maxX + 0.7, z: mid }, { x: minX - 0.7, z: mid },
+    { x: minX - 0.7, z: back }, { x: maxX + 0.7, z: back },
+    { x: 0, z: front },
+  ];
+}
+
+function initBotsRuntime() {
+  S.botT = {};
+  const t = now();
+  // each bot plateaus at 4–6 correct, so the class hovers near the pass line and
+  // the human (as student who scores, or as teacher who expels) tips the result.
+  for (const id of S.botIds) S.botT[id] = { nextGain: t + 1 + Math.random() * 3, nextAct: t + 2 + Math.random() * 4, cap: 4 + Math.floor(Math.random() * 3) };
+  S.tPatrol = { i: 0, pts: teacherWaypoints() };
+  S.tYaw = 0; S.tPoseAt = 0; S.dutyClearAt = 0;
+}
+
+function tickBots(t, dt) {
+  if (!S.botIds || !S.net || !S.net.isHost() || S.phase !== 'exam') return;
+  if (!S.botT) initBotsRuntime();
+  // AI teacher (only when the human is a student)
+  if (!isTeacher() && S.botIds.has(S.teacherId)) tickTeacherBot(t, dt);
+  // classmate bots
+  for (const p of students()) if (S.botIds.has(p.id)) tickStudentBot(t, p.id);
+}
+
+function tickTeacherBot(t, dt) {
+  const tb = S.teacherId;
+  // auto-complete duties so the AI teacher never tanks its own inspection
+  if (S.duty) { if (!S.dutyClearAt) S.dutyClearAt = t + 3.2; if (t > S.dutyClearAt) { S.net.send('dutyDone'); S.dutyClearAt = 0; } }
+  else S.dutyClearAt = 0;
+  // patrol
+  const P = S.tPatrol, pt = P.pts[P.i];
+  const dx = pt.x - S.tPos.x, dz = pt.z - S.tPos.z, d = Math.hypot(dx, dz);
+  if (d < 0.18) P.i = (P.i + 1) % P.pts.length;
+  else { const step = Math.min(2.3 * dt, d); S.tPos.x += dx / d * step; S.tPos.z += dz / d * step; S.tYaw = Math.atan2(dx, dz); }
+  if (t > S.tPoseAt) { S.tPoseAt = t + 0.1; S.net.sendAs(tb, 'pose', { x: S.tPos.x, z: S.tPos.z, yaw: S.tYaw }); }
+  // accuse a student cheating within view + catch window
+  if (t - S.lastHostAccuse >= ACCUSE_CD) {
+    for (const p of students()) {
+      if (S.expelled[p.id]) continue;
+      const seat = S.seats[p.id], d2 = DESKS[seat] ? Math.hypot(S.tPos.x - DESKS[seat].x, S.tPos.z - DESKS[seat].z) : 99;
+      if (d2 > 3.3) continue;
+      const caught = S.actionLog.some(a => a.pid === p.id && a.t1 >= t - CATCH_WINDOW && a.t0 <= t && entryIsReal(a) && !a.riot);
+      if (caught && Math.random() < 0.6) { S.net.sendAs(tb, 'accuse', { target: p.id }); break; }
+    }
+  }
+}
+
+function tickStudentBot(t, id) {
+  if (S.expelled[id]) return;
+  const T = S.botT[id]; if (!T) return;
+  const ans = S.answers[id] || (S.answers[id] = Array(N_QUESTIONS).fill(null));
+  // acquire correct answers over time (abstracts "successful cheating")
+  if (t > T.nextGain) {
+    T.nextGain = t + 2.5 + Math.random() * 3.5;
+    let correct = 0;
+    const missing = [];
+    for (let q = 0; q < N_QUESTIONS; q++) { if (ans[q] === S.exam[q].correct) correct++; else missing.push(q); }
+    if (missing.length && correct < T.cap) {
+      const q = missing[Math.floor(Math.random() * missing.length)];
+      ans[q] = S.exam[q].correct;                 // acquire one more correct answer
+      S.net.sendAs(id, 'answers', { filled: ans.slice() });
+    }
+  }
+  // a visible, catchable cheat (peek at a neighbour) — gives the teacher a target
+  if (t > T.nextAct) {
+    T.nextAct = t + 3 + Math.random() * 5;
+    const seat = S.seats[id];
+    const nb = students().find(p => p.id !== id && S.seats[p.id] != null && seatAdjacent(S.seats[p.id], seat));
+    if (nb) S.net.sendAs(id, 'act', { type: Math.random() < 0.5 ? 'peek' : 'flash', meta: { target: nb.id } });
   }
 }
 
@@ -361,6 +471,7 @@ function onEvent(ev) {
       buildAvatars();
       const seat = mySeat();
       if (seat != null) S.walk = { x: DESKS[seat].x, z: DESKS[seat].z + 1.6 };
+      if (S.botIds) { S.botT = null; S.tPos = { x: 0, z: TEACHER_DESK.z + 0.6 }; }  // reset bot runtime
       break;
     }
     case 'deal': {
@@ -1051,6 +1162,7 @@ function showResults(data) {
 hud.init({
   onCreate: (name, role) => join(true, name, role),
   onJoin: (name, role, code) => join(false, name, role, code),
+  onSolo: (name, role) => joinSolo(name, role),
   onStart: () => hostStart(),
   onAgain: () => { S.phase = 'lobby'; S.resultsSent = false; hud.hideOverlays(); refreshLobby(); },
   onAnswer: (q, oi) => { if (S.phase === 'exam' && !S.expelled[S.myId]) setMyAnswer(q, oi); },
@@ -1116,6 +1228,7 @@ function frame(nowMs) {
   lastT = nowMs;
   const t = now();
 
+  tickBots(t, dt);
   dutyTick(dt);
 
   if (S.net && t > S.poseDirty && ['prep', 'inspect', 'exam'].includes(S.phase)) {
