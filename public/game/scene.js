@@ -795,40 +795,6 @@ function makeAccessory(head, acc, accColor) {
   }
 }
 
-// A simple rounded mitten hand (no fingers) in the hide-&-seek / Fall Guys idiom:
-// a soft oval nub with a small thumb bump and a shirt cuff. Toon outline included.
-function makeHand(skinM, shirtM, side) {
-  const g = new THREE.Group();
-  const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.055, 0.06, 12), shirtM);
-  cuff.position.set(0, 0.03, 0); g.add(cuff);
-  const mitt = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 14), skinM);
-  mitt.scale.set(0.95, 1.28, 0.74); mitt.position.set(0, -0.085, 0);
-  mitt.castShadow = true; outline(mitt, 1.05); g.add(mitt);
-  const thumb = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 10), skinM);
-  thumb.scale.set(0.9, 1.2, 0.9); thumb.position.set(side * 0.055, -0.055, 0.015);
-  outline(thumb, 1.06); g.add(thumb);
-  return g;
-}
-
-// A proper shoe: rubber sole, leather upper, rounded toe cap, tongue + heel.
-function makeShoe() {
-  const g = new THREE.Group();
-  const leather = mat('#241f28', { roughness: 0.42 });
-  const sole = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.28), mat('#14111a', { roughness: 0.6 }));
-  sole.position.set(0, -0.02, -0.03); g.add(sole);
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.076, 12, 10), leather);
-  body.scale.set(1, 0.95, 1.7); body.position.set(0, 0.03, -0.02); outline(body, 1.05); g.add(body);
-  const toe = new THREE.Mesh(new THREE.SphereGeometry(0.058, 12, 10), leather);
-  toe.scale.set(1, 0.82, 1.0); toe.position.set(0, 0.015, -0.15); g.add(toe);
-  const tongue = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.055, 0.05), leather);
-  tongue.position.set(0, 0.075, 0.04); g.add(tongue);
-  for (const ly of [0.05, 0.09]) {                 // laces
-    const lace = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.008, 0.008), mat('#d8d2c4', { roughness: 0.8 }));
-    lace.position.set(0, ly, -0.01); g.add(lace);
-  }
-  return g;
-}
-
 // A balding grey horseshoe: two staggered rows of tufts around the sides and
 // back, sideburns by the ears, crown left bald. ~35 little shapes.
 function makeTeacherHair(head) {
@@ -908,20 +874,20 @@ function buildStanding(g, look, shirt, pants, skinM) {
     const knee = new THREE.Group(); knee.position.set(0, -0.42, 0); hip.add(knee);
     const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.26, 4, 10), pants);
     shin.position.set(0, -0.17, 0); shin.castShadow = true; outline(shin, 1.05); knee.add(shin);
-    const shoe = makeShoe();
-    shoe.position.set(0, -0.33, 0); knee.add(shoe);
+    // simple smooth rounded foot (hide-&-seek clay-doll style, no laced shoe)
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.088, 14, 12), mat('#2a2632', { roughness: 0.5 }));
+    foot.scale.set(1, 0.66, 1.75); foot.position.set(0, -0.35, -0.045); foot.castShadow = true; outline(foot, 1.05); knee.add(foot);
     joints.legs.push({ hip, knee, side });
   }
-  // arms: shoulder pivot -> upper -> elbow pivot -> forearm + hand (all connected)
+  // arms: shoulder pivot -> upper -> elbow pivot -> smooth forearm (no hand)
   for (const side of [-1, 1]) {
     const sh = new THREE.Group(); sh.position.set(side * 0.245, SHOULDER_Y, 0); sh.rotation.z = side * 0.09; g.add(sh);
     const up = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.28, 4, 10), shirt);
     up.position.set(0, -0.18, 0); up.castShadow = true; outline(up, 1.05); sh.add(up);
     const el = new THREE.Group(); el.position.set(0, -0.36, 0); sh.add(el);
-    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.24, 4, 10), skinM);
-    fore.position.set(0, -0.15, 0); outline(fore, 1.05); el.add(fore);
-    const hand = makeHand(skinM, shirt, side);
-    hand.position.set(0, -0.30, 0); el.add(hand);
+    // forearm tapers to a plain rounded end — no mitten/hand
+    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.34, 6, 12), skinM);
+    fore.position.set(0, -0.20, 0); fore.castShadow = true; outline(fore, 1.05); el.add(fore);
     joints.arms.push({ sh, el, side, rest: side * 0.09 });
   }
   return { body, head, eyes, joints, standing: true, phase: Math.random() * 7, walk: 0, prev: null };
