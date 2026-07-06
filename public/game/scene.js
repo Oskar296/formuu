@@ -633,7 +633,9 @@ function shade(hex, pct) {
 }
 
 const OUTLINE = new THREE.MeshBasicMaterial({ color: '#221a20', side: THREE.BackSide });
+let OUTLINES = true;                       // toggled off for the smooth standing figure
 function outline(mesh, grow = 1.045) {
+  if (!OUTLINES) return;
   const o = new THREE.Mesh(mesh.geometry, OUTLINE);
   o.scale.setScalar(grow);
   mesh.add(o);
@@ -692,7 +694,7 @@ function torsoGeo() {
     [0.30, 0.00], [0.315, 0.08], [0.27, 0.26], [0.285, 0.42],
     [0.30, 0.52], [0.26, 0.62], [0.14, 0.70], [0.02, 0.72],
   ].map(([r, y]) => new THREE.Vector2(r, y));
-  return new THREE.LatheGeometry(pts, 18);
+  return new THREE.LatheGeometry(pts, 32);
 }
 
 function makeHairStyle(head, style, color) {
@@ -798,24 +800,22 @@ function makeAccessory(head, acc, accColor) {
 // A balding grey horseshoe: two staggered rows of tufts around the sides and
 // back, sideburns by the ears, crown left bald. ~35 little shapes.
 function makeTeacherHair(head) {
-  const grey = mat('#a9a9b2', { roughness: 0.95 }), greyD = mat('#8c8c96', { roughness: 0.95 });
-  for (let i = 0; i < 22; i++) {
-    const a = (i / 22) * Math.PI * 2;
-    if (Math.sin(a) < -0.35) continue;             // skip the bald forehead/front
-    const tuft = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 7), i % 2 ? grey : greyD);
-    tuft.scale.set(1.15, 1.35, 1.0);
-    tuft.position.set(Math.cos(a) * 0.255, 0.015 + rnd() * 0.05, Math.sin(a) * 0.255);
-    head.add(tuft);
+  const grey = mat('#a7a7b0', { roughness: 0.9 });
+  // one smooth swept tube forms the horseshoe (sides + back, open at the front)
+  const pts = [];
+  for (let i = 0; i <= 20; i++) {
+    const a = -Math.PI * 0.25 + (i / 20) * Math.PI * 1.5;
+    const r = 0.25, y = 0.03 + Math.max(0, Math.sin(a)) * 0.06;
+    pts.push(new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r));
   }
-  for (let i = 0; i < 11; i++) {                    // higher wisps at the back
-    const a = Math.PI * 0.28 + (i / 11) * Math.PI * 1.44;
-    const tuft = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), grey);
-    tuft.scale.set(1, 0.8, 1); tuft.position.set(Math.cos(a) * 0.225, 0.12 + rnd() * 0.03, Math.sin(a) * 0.225);
-    head.add(tuft);
-  }
-  for (const sx of [-1, 1]) {                        // sideburns
-    const sb = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.1, 0.06), greyD);
-    sb.position.set(sx * 0.25, -0.03, -0.03); head.add(sb);
+  const band = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 48, 0.062, 14, false), grey);
+  head.add(band);
+  // smooth combover over the back crown
+  const comb = new THREE.Mesh(new THREE.SphereGeometry(0.22, 24, 18, 0, Math.PI * 2, 0, Math.PI * 0.5), grey);
+  comb.scale.set(1.05, 0.5, 1.05); comb.position.set(0, 0.13, 0.09); head.add(comb);
+  for (const sx of [-1, 1]) {
+    const sb = new THREE.Mesh(new THREE.CapsuleGeometry(0.03, 0.05, 6, 10), grey);
+    sb.position.set(sx * 0.245, -0.02, -0.03); head.add(sb);
   }
 }
 
@@ -823,13 +823,13 @@ function makeTeacherHair(head) {
 function buildPerson(g, look, { standing = false } = {}) {
   const shirt = shirtMat(look.shirt);
   const pants = mat('#39404f', { roughness: 0.9 });
-  const skinM = mat(look.skin, { roughness: 0.6 });
+  const skinM = mat(look.skin, { roughness: 0.82 });   // matte, clay-like
   return standing ? buildStanding(g, look, shirt, pants, skinM)
                   : buildSeated(g, look, shirt, pants, skinM);
 }
 
 function addHead(g, look, skinM, y) {
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 24, 18), skinM);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 32, 24), skinM);
   head.position.set(0, y, 0);
   head.scale.set(1, 1.06, 0.98);
   head.castShadow = true;
@@ -855,10 +855,13 @@ function buildStanding(g, look, shirt, pants, skinM) {
   outline(body);
   g.add(body);
   // pelvis sits inside the torso base and over the hips so there is no gap
-  const pelvis = new THREE.Mesh(new THREE.SphereGeometry(0.27, 16, 12), pants);
+  const pelvis = new THREE.Mesh(new THREE.SphereGeometry(0.27, 28, 20), pants);
   pelvis.position.set(0, HIP_Y, 0);
   pelvis.scale.set(1, 0.72, 0.86);
   g.add(pelvis);
+  // rounded chest/shoulder mass fused to the torso top so the arms don't just poke out
+  const chest = new THREE.Mesh(new THREE.SphereGeometry(0.28, 28, 20), shirt);
+  chest.position.set(0, 1.34, 0); chest.scale.set(1.02, 0.62, 0.82); g.add(chest);
 
   const collar = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.033, 8, 16), mat(shade(look.shirt, -22), { roughness: 0.85 }));
   collar.position.set(0, 1.47, 0); collar.rotation.x = Math.PI / 2; g.add(collar);
@@ -866,28 +869,28 @@ function buildStanding(g, look, shirt, pants, skinM) {
   neck.position.set(0, 1.46, 0); g.add(neck);
   const { head, eyes } = addHead(g, look, skinM, 1.75);
 
-  // legs: hip pivot -> thigh -> knee pivot -> shin + shoe, reaching the floor
+  // legs: hip pivot -> thigh -> knee pivot -> shin + smooth foot, reaching the floor
   for (const side of [-1, 1]) {
     const hip = new THREE.Group(); hip.position.set(side * 0.12, HIP_Y, 0); g.add(hip);
-    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.095, 0.30, 4, 10), pants);
+    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.30, 8, 22), pants);
     thigh.position.set(0, -0.20, 0); thigh.castShadow = true; outline(thigh, 1.05); hip.add(thigh);
     const knee = new THREE.Group(); knee.position.set(0, -0.42, 0); hip.add(knee);
-    const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.26, 4, 10), pants);
+    const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.26, 8, 22), pants);
     shin.position.set(0, -0.17, 0); shin.castShadow = true; outline(shin, 1.05); knee.add(shin);
-    // simple smooth rounded foot (hide-&-seek clay-doll style, no laced shoe)
-    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.088, 14, 12), mat('#2a2632', { roughness: 0.5 }));
-    foot.scale.set(1, 0.66, 1.75); foot.position.set(0, -0.35, -0.045); foot.castShadow = true; outline(foot, 1.05); knee.add(foot);
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.09, 20, 16), mat('#2a2632', { roughness: 0.6 }));
+    foot.scale.set(1, 0.66, 1.8); foot.position.set(0, -0.35, -0.05); foot.castShadow = true; outline(foot, 1.05); knee.add(foot);
     joints.legs.push({ hip, knee, side });
   }
-  // arms: shoulder pivot -> upper -> elbow pivot -> smooth forearm (no hand)
+  // arms: shoulder pivot -> deltoid blend -> upper -> elbow -> smooth forearm (no hand)
   for (const side of [-1, 1]) {
-    const sh = new THREE.Group(); sh.position.set(side * 0.245, SHOULDER_Y, 0); sh.rotation.z = side * 0.09; g.add(sh);
-    const up = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.28, 4, 10), shirt);
-    up.position.set(0, -0.18, 0); up.castShadow = true; outline(up, 1.05); sh.add(up);
-    const el = new THREE.Group(); el.position.set(0, -0.36, 0); sh.add(el);
-    // forearm tapers to a plain rounded end — no mitten/hand
-    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.34, 6, 12), skinM);
-    fore.position.set(0, -0.20, 0); fore.castShadow = true; outline(fore, 1.05); el.add(fore);
+    const sh = new THREE.Group(); sh.position.set(side * 0.235, SHOULDER_Y, 0); sh.rotation.z = side * 0.09; g.add(sh);
+    const delt = new THREE.Mesh(new THREE.SphereGeometry(0.1, 20, 16), shirt);
+    delt.scale.set(1, 1, 0.9); sh.add(delt);                    // rounds the arm into the shoulder
+    const up = new THREE.Mesh(new THREE.CapsuleGeometry(0.072, 0.28, 8, 20), shirt);
+    up.position.set(0, -0.2, 0); up.castShadow = true; outline(up, 1.05); sh.add(up);
+    const el = new THREE.Group(); el.position.set(0, -0.38, 0); sh.add(el);
+    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.064, 0.34, 8, 20), skinM);
+    fore.position.set(0, -0.2, 0); fore.castShadow = true; outline(fore, 1.05); el.add(fore);
     joints.arms.push({ sh, el, side, rest: side * 0.09 });
   }
   return { body, head, eyes, joints, standing: true, phase: Math.random() * 7, walk: 0, prev: null };
@@ -1030,7 +1033,9 @@ export function makeMannequin(scene, look, name) {
 export function makeTeacher(scene, name) {
   const g = new THREE.Group();
   const look = { shirt: '#3e3e50', skin: '#e8bd96', hair: 'none', acc: 'none' };
+  const prevOL = OUTLINES; OUTLINES = false;                 // smooth, outline-free teacher
   const parts = buildPerson(g, look, { standing: true });   // connected, walkable body
+  OUTLINES = prevOL;
   const head = parts.head;
   // teacher features layered onto the head/torso
   makeAccessory(head, 'glasses');
