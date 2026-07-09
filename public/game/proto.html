@@ -1,0 +1,184 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%}#c{display:block}</style>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script></head>
+<body><canvas id="c"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { MarchingCubes } from './vendor/MarchingCubes.js';
+
+// ============ SDF body: capsules + smooth-min = one sculpted surface ============
+const smin=(a,b,k)=>{const h=Math.max(k-Math.abs(a-b),0)/k;return Math.min(a,b)-h*h*k*0.25;};
+function sdSeg(px,py,pz,ax,ay,az,bx,by,bz,r0,r1){
+  const abx=bx-ax,aby=by-ay,abz=bz-az,apx=px-ax,apy=py-ay,apz=pz-az;
+  let t=(apx*abx+apy*aby+apz*abz)/(abx*abx+aby*aby+abz*abz); t=t<0?0:t>1?1:t;
+  const dx=apx-abx*t,dy=apy-aby*t,dz=apz-abz*t;
+  return Math.sqrt(dx*dx+dy*dy+dz*dz)-(r0+(r1-r0)*t);
+}
+function sdEll(px,py,pz,cx,cy,cz,rx,ry,rz){
+  const kx=(px-cx)/rx,ky=(py-cy)/ry,kz=(pz-cz)/rz;
+  const k0=Math.sqrt(kx*kx+ky*ky+kz*kz);
+  const kx1=kx/rx,ky1=ky/ry,kz1=kz/rz;
+  const k1=Math.sqrt(kx1*kx1+ky1*ky1+kz1*kz1);
+  return k1===0?-Math.min(rx,ry,rz):k0*(k0-1)/k1;
+}
+function bodySDF(x,y,z){
+  // torso: chest + belly blended (slimmer so arms clear it)
+  let d=sdEll(x,y,z, 0,1.26,0, 0.18,0.20,0.158);
+  d=smin(d, sdEll(x,y,z, 0,1.00,0, 0.195,0.23,0.18), 0.13);
+  // neck + egg head
+  d=smin(d, sdSeg(x,y,z, 0,1.36,0, 0,1.50,0, 0.105,0.09), 0.09);
+  d=smin(d, sdEll(x,y,z, 0,1.63,0, 0.183,0.226,0.18), 0.055);
+  for(const s of [-1,1]){
+    // arm: hangs with a visible gap; blends only at the shoulder
+    d=smin(d, sdSeg(x,y,z, s*0.228,1.31,0, s*0.295,0.85,0, 0.072,0.058), 0.04);
+    d=smin(d, sdEll(x,y,z, s*0.30,0.775,0, 0.065,0.095,0.045), 0.038);
+    // leg: tapered capsule hip->ankle, foot
+    d=smin(d, sdSeg(x,y,z, s*0.113,0.90,0, s*0.113,0.16,0, 0.112,0.086), 0.075);
+    d=smin(d, sdEll(x,y,z, s*0.115,0.062,-0.05, 0.10,0.058,0.185), 0.05);
+  }
+  return d;
+}
+
+// ============ polygonize the SDF once ============
+const RES=112, ISO=80, NS=0.46, OY=0.04;
+const mcMat=new THREE.MeshStandardMaterial({color:'#eef0f2',roughness:0.58});
+const mc=new MarchingCubes(RES,mcMat,false,false,900000);
+mc.isolation=ISO;
+{
+  const f=mc.field, S=ISO/0.045;      // ~4.5cm smooth band around the surface
+  let i=0;
+  for(let iz=0;iz<RES;iz++){ const wz=((iz/RES)-0.5)/NS;
+    for(let iy=0;iy<RES;iy++){ const wy=((iy/RES)-OY)/NS;
+      for(let ix=0;ix<RES;ix++,i++){ const wx=((ix/RES)-0.5)/NS;
+        const d=bodySDF(wx,wy,wz);
+        f[i]=ISO-d*S;
+      }}}
+  mc.update();
+}
+// bake into a plain BufferGeometry in WORLD units
+const src=mc.geometry, n=mc.count;
+const pos=new Float32Array(n*3), nor=new Float32Array(n*3);
+const sp=src.getAttribute('position').array, sn=src.getAttribute('normal').array;
+for(let v=0;v<n;v++){
+  // mc local [-1,1] -> normalized [0,1] -> world
+  const lx=sp[v*3],ly=sp[v*3+1],lz=sp[v*3+2];
+  pos[v*3]  =((lx+1)/2-0.5)/NS;
+  pos[v*3+1]=((ly+1)/2-OY)/NS;
+  pos[v*3+2]=((lz+1)/2-0.5)/NS;
+  nor[v*3]=sn[v*3];nor[v*3+1]=sn[v*3+1];nor[v*3+2]=sn[v*3+2];
+}
+const geo=new THREE.BufferGeometry();
+geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+geo.setAttribute('normal',new THREE.BufferAttribute(nor,3));
+
+// ============ auto-skin to a small skeleton so it BENDS smoothly ============
+// bone segments in world space: [name, ax,ay,az, bx,by,bz, parentIdx]
+const SEGS=[
+  ['pelvis', 0,0.90,0,  0,1.15,0,  -1],
+  ['spine',  0,1.15,0,  0,1.45,0,   0],
+  ['head',   0,1.45,0,  0,1.85,0,   1],
+  ['armL_u', -0.228,1.31,0, -0.262,1.08,0, 1],
+  ['armL_f', -0.262,1.08,0, -0.30,0.72,0,  3],
+  ['armR_u',  0.228,1.31,0,  0.262,1.08,0, 1],
+  ['armR_f',  0.262,1.08,0,  0.30,0.72,0,  5],
+  ['legL_u', -0.113,0.90,0, -0.113,0.52,0, 0],
+  ['legL_f', -0.113,0.52,0, -0.113,0.02,0, 7],
+  ['legR_u',  0.113,0.90,0,  0.113,0.52,0, 0],
+  ['legR_f',  0.113,0.52,0,  0.113,0.02,0, 9],
+];
+function segDist(px,py,pz,S){
+  const [,ax,ay,az,bx,by,bz]=S;
+  const abx=bx-ax,aby=by-ay,abz=bz-az,apx=px-ax,apy=py-ay,apz=pz-az;
+  let t=(apx*abx+apy*aby+apz*abz)/(abx*abx+aby*aby+abz*abz); t=t<0?0:t>1?1:t;
+  const dx=apx-abx*t,dy=apy-aby*t,dz=apz-abz*t;
+  return Math.sqrt(dx*dx+dy*dy+dz*dz);
+}
+const skinIndex=new Uint16Array(n*4), skinWeight=new Float32Array(n*4);
+// smooth analytic weights: every boundary is a smoothstep blend, so the mesh
+// never tears — belly stays on the spine, limbs fade in over a soft band.
+const ss=(e0,e1,x)=>{let t=(x-e0)/(e1-e0);t=t<0?0:t>1?1:t;return t*t*(3-2*t);};
+const IDX={pelvis:0,spine:1,head:2,armLu:3,armLf:4,armRu:5,armRf:6,legLu:7,legLf:8,legRu:9,legRf:10};
+for(let v=0;v<n;v++){
+  const px=pos[v*3],py=pos[v*3+1];
+  const ax=Math.abs(px), right=ss(-0.03,0.03,px);
+  const arm=py>0.5?ss(0.155,0.215,ax):0;             // outer band above the hips = arm
+  const leg=(1-arm)*ss(0.97,0.85,py);                // below the hips = leg
+  const torso=Math.max(0,1-arm-leg);
+  const cand=[];
+  if(arm>0){ const up=ss(1.00,1.16,py);              // elbow blend
+    const u=arm*up, f=arm*(1-up);
+    if(u>0)cand.push([right>0.5?IDX.armRu:IDX.armLu,u]);
+    if(f>0)cand.push([right>0.5?IDX.armRf:IDX.armLf,f]); }
+  if(leg>0){ const th=ss(0.44,0.60,py);              // knee blend
+    const t2=leg*th, sh=leg*(1-th);
+    const lw=1-right, rw=right;                      // crotch splits softly between legs
+    if(t2*lw>0.001)cand.push([IDX.legLu,t2*lw]); if(t2*rw>0.001)cand.push([IDX.legRu,t2*rw]);
+    if(sh*lw>0.001)cand.push([IDX.legLf,sh*lw]); if(sh*rw>0.001)cand.push([IDX.legRf,sh*rw]); }
+  if(torso>0){ const h=ss(1.40,1.52,py), rest=torso*(1-h);
+    const sp=ss(1.02,1.22,py);
+    if(torso*h>0.001)cand.push([IDX.head,torso*h]);
+    if(rest*sp>0.001)cand.push([IDX.spine,rest*sp]);
+    if(rest*(1-sp)>0.001)cand.push([IDX.pelvis,rest*(1-sp)]); }
+  cand.sort((a,b)=>b[1]-a[1]);
+  let tot=0; for(let k=0;k<4&&k<cand.length;k++)tot+=cand[k][1];
+  for(let k=0;k<4;k++){
+    if(k<cand.length){ skinIndex[v*4+k]=cand[k][0]; skinWeight[v*4+k]=cand[k][1]/tot; }
+    else { skinIndex[v*4+k]=0; skinWeight[v*4+k]=0; }
+  }
+}
+geo.setAttribute('skinIndex',new THREE.BufferAttribute(skinIndex,4));
+geo.setAttribute('skinWeight',new THREE.BufferAttribute(skinWeight,4));
+
+// build the skeleton (bone origin = segment start, in parent's space)
+const bones=SEGS.map(()=>new THREE.Bone());
+SEGS.forEach((S,i)=>{
+  const p=S[7-0]; // parent idx is at position 7
+});
+for(let i=0;i<SEGS.length;i++){
+  const S=SEGS[i], par=S[7];
+  const ax=S[1],ay=S[2],az=S[3];
+  if(par<0){ bones[i].position.set(ax,ay,az); }
+  else { bones[par].add(bones[i]); bones[i].position.set(ax-SEGS[par][1],ay-SEGS[par][2],az-SEGS[par][3]); }
+}
+const skinnedMat=new THREE.MeshStandardMaterial({color:'#eef0f2',roughness:0.58});
+const mesh=new THREE.SkinnedMesh(geo,skinnedMat);
+mesh.castShadow=true;
+const skeleton=new THREE.Skeleton(bones);
+mesh.add(bones[0]);
+mesh.bind(skeleton);
+
+// ============ scene ============
+const canvas=document.getElementById('c');
+const r=new THREE.WebGLRenderer({canvas,antialias:true}); r.setPixelRatio(2); r.setSize(760,980);
+r.shadowMap.enabled=true; r.shadowMap.type=THREE.PCFSoftShadowMap;
+r.toneMapping=THREE.ACESFilmicToneMapping; r.toneMappingExposure=1.05;
+const scene=new THREE.Scene();
+{const cc=document.createElement('canvas');cc.width=8;cc.height=256;const x=cc.getContext('2d');
+ const g0=x.createLinearGradient(0,0,0,256);g0.addColorStop(0,'#eef1f6');g0.addColorStop(1,'#ccd4de');
+ x.fillStyle=g0;x.fillRect(0,0,8,256);scene.background=new THREE.CanvasTexture(cc);}
+const cam=new THREE.PerspectiveCamera(32,760/980,0.1,100);
+const key=new THREE.DirectionalLight('#fff4e6',2.0);key.position.set(-4,8,-5);key.castShadow=true;
+key.shadow.mapSize.set(2048,2048);key.shadow.camera.left=-2;key.shadow.camera.right=2;key.shadow.camera.top=3.5;key.shadow.camera.bottom=-1;key.shadow.bias=-0.0004;scene.add(key);
+scene.add(new THREE.DirectionalLight('#d0e0ff',0.55).translateX(5).translateY(3).translateZ(-4));
+const rim=new THREE.DirectionalLight('#fff',0.85);rim.position.set(0,4,6);scene.add(rim);
+scene.add(new THREE.HemisphereLight('#ffffff','#b4ac9e',0.5));
+const floor=new THREE.Mesh(new THREE.CircleGeometry(6,48),new THREE.MeshStandardMaterial({color:'#d2d7de',roughness:1}));
+floor.rotation.x=-Math.PI/2;floor.receiveShadow=true;scene.add(floor);
+const g=new THREE.Group(); g.add(mesh); scene.add(g);
+
+cam.position.set(0.75,1.15,-4.9); cam.lookAt(0,0.92,0);
+const P=new URLSearchParams(location.search);
+if(P.has('side')) g.rotation.y=0.6;
+const walk=P.has('walk');
+let t=0;
+const B={armLu:bones[3],armLf:bones[4],armRu:bones[5],armRf:bones[6],legLu:bones[7],legLf:bones[8],legRu:bones[9],legRf:bones[10]};
+function frame(){requestAnimationFrame(frame); t+=0.016;
+  if(walk){
+    // clean mid-stride: left leg forward straight, right leg back with bent knee
+    B.legLu.rotation.x= 0.5;  B.legLf.rotation.x=0.05;
+    B.legRu.rotation.x=-0.45; B.legRf.rotation.x=0.75;
+    B.armLu.rotation.x=-0.4;  B.armRu.rotation.x=0.4;
+    g.rotation.y=0.55;
+  }
+  r.render(scene,cam);}
+frame(); window.__ready=true;
+</script></body></html>
