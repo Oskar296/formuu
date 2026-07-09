@@ -191,17 +191,36 @@ const g=new THREE.Group(); g.add(mesh); scene.add(g);
 cam.position.set(0.75,1.15,-4.9); cam.lookAt(0,0.92,0);
 const P=new URLSearchParams(location.search);
 if(P.has('side')) g.rotation.y=0.6;
-const walk=P.has('walk');
+const walk=P.has('walk'), sit=P.has('sit');
 let t=0;
-const B={armLu:bones[3],armLf:bones[4],armRu:bones[5],armRf:bones[6],legLu:bones[7],legLf:bones[8],legRu:bones[9],legRf:bones[10]};
+const B={pelvis:bones[0],spine:bones[1],headB:bones[2],armLu:bones[3],armLf:bones[4],armRu:bones[5],armRf:bones[6],legLu:bones[7],legLf:bones[8],legRu:bones[9],legRf:bones[10]};
+// natural walk cycle: knee bends on the back-swing and recovery, feet lift,
+// arms counter-swing with a soft elbow, slight torso lean + bob + sway
+function walkPose(B,ph,amp,mesh){
+  const swL=Math.sin(ph), swR=Math.sin(ph+Math.PI);
+  B.legLu.rotation.x=swL*0.5*amp;
+  B.legRu.rotation.x=swR*0.5*amp;
+  B.legLf.rotation.x=Math.max(0,-Math.sin(ph-0.5))*0.75*amp+0.05;
+  B.legRf.rotation.x=Math.max(0,-Math.sin(ph+Math.PI-0.5))*0.75*amp+0.05;
+  B.armLu.rotation.x=-swL*0.38*amp;
+  B.armRu.rotation.x=-swR*0.38*amp;
+  B.armLf.rotation.x=-0.15*amp;
+  B.armRf.rotation.x=-0.15*amp;
+  B.spine.rotation.x=0.06*amp;                       // slight forward lean
+  B.spine.rotation.y=Math.sin(ph)*0.06*amp;          // shoulder sway
+  B.headB.rotation.x=-0.06*amp;                      // head stays level
+  mesh.position.y=Math.abs(Math.sin(ph))*0.02*amp;   // step bob
+}
+function sitPose(B){
+  B.legLu.rotation.x=1.45; B.legRu.rotation.x=1.45;  // thighs forward
+  B.legLf.rotation.x=-1.35; B.legRf.rotation.x=-1.35; // shins hang down
+  B.armLu.rotation.x=0.55; B.armRu.rotation.x=0.55;  // arms rest forward
+  B.armLf.rotation.x=0.35; B.armRf.rotation.x=0.35;
+  B.spine.rotation.x=-0.04;
+}
 function frame(){requestAnimationFrame(frame); t+=0.016;
-  if(walk){
-    // game-realistic mid-stride
-    B.legLu.rotation.x= 0.38; B.legLf.rotation.x=0.05;
-    B.legRu.rotation.x=-0.34; B.legRf.rotation.x=0.6;
-    B.armLu.rotation.x=-0.32; B.armRu.rotation.x=0.32;
-    g.rotation.y=0.55;
-  }
+  if(walk){ walkPose(B, t*6, 1, mesh); g.rotation.y=0.55; }
+  if(sit){ sitPose(B); g.rotation.y=0.55; }
   r.render(scene,cam);}
 window.__g=g; frame(); window.__ready=true;
 </script></body></html>
