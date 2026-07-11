@@ -60,7 +60,7 @@ export class BotBrain {
         }
       }
       const dx = b.wander.x - b.wx, dz = b.wander.z - b.wz, dist = Math.hypot(dx, dz);
-      if (dist > 0.05) { b.wx += dx / dist * Math.min(dist, 1.9 * dt); b.wz += dz / dist * Math.min(dist, 1.9 * dt); }
+      if (dist > 0.05) { b.wx += dx / dist * Math.min(dist, 2.6 * dt); b.wz += dz / dist * Math.min(dist, 2.6 * dt); }
       if (now > b.poseAt) { b.poseAt = now + 0.12; this.net.sendAs(p.id, 'pose', { x: b.wx, z: b.wz, yaw: Math.atan2(dx, dz) + Math.PI, walk: dist > 0.1 ? 1 : 0 }); }
       return;
     }
@@ -117,7 +117,7 @@ export class BotBrain {
     if (r.st === 'wait') {
       if (now > r.until) { r.st = 'back'; r.tx = d.x; r.tz = d.z + 0.7; }
     } else if (dist > 0.14) {
-      const sp = 2.0 * dt;
+      const sp = 2.8 * dt;
       b.wx += dx / dist * Math.min(dist, sp); b.wz += dz / dist * Math.min(dist, sp);
     } else if (r.st === 'go') {
       r.st = 'wait'; r.until = now + 1.4 + Math.random();
@@ -154,7 +154,7 @@ export class BotBrain {
     } else if (Math.hypot(tb.x - goal.x, tb.z - goal.z) < 0.4) tb.wp = (tb.wp + 1) % WAY.length;
     const dx = goal.x - tb.x, dz = goal.z - tb.z, dist = Math.hypot(dx, dz);
     if (dist > 0.05) {
-      tb.x += dx / dist * Math.min(dist, 2.1 * dt); tb.z += dz / dist * Math.min(dist, 2.1 * dt);
+      tb.x += dx / dist * Math.min(dist, 3.1 * dt); tb.z += dz / dist * Math.min(dist, 3.1 * dt);
       tb.yaw = Math.atan2(dx, dz) + Math.PI;
     }
     this.pose(p, tb, now, dist > 0.1 ? 1 : 0);

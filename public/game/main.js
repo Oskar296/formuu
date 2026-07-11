@@ -29,8 +29,18 @@ renderer.toneMappingExposure = 1.05;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#cfd8e4');
 scene.fog = new THREE.Fog('#cfd8e4', 24, 46);
-const camera = new THREE.PerspectiveCamera(profile.fov, 1, 0.05, 90);
-function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 90);
+// the profile stores a HORIZONTAL fov (like Minecraft's wide feel); the
+// vertical fov is derived from the window shape so narrow windows and
+// phones don't collapse into a zoomed-in tunnel
+const DEG = Math.PI / 180;
+let fovKick = 0;   // sprinting widens the view a touch
+function applyFov() {
+  const h = Math.min(150, profile.fovH + fovKick);
+  camera.fov = Math.max(45, Math.min(120, 2 * Math.atan(Math.tan(h * DEG / 2) / camera.aspect) / DEG));
+  camera.updateProjectionMatrix();
+}
+function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; applyFov(); }
 addEventListener('resize', resize); resize();
 lights(scene);
 const room = buildClassroom(scene);
@@ -119,13 +129,13 @@ function refreshWho() {
   $('soundBtn').onclick = () => ($('soundBtn').textContent = sfx.toggle() ? '🔇' : '🔊');
   // settings: username + color
   $('setFov').oninput = () => {
-    profile.fov = +$('setFov').value;
-    $('fovVal').textContent = profile.fov;
-    camera.fov = profile.fov; camera.updateProjectionMatrix();
+    profile.fovH = +$('setFov').value;
+    $('fovVal').textContent = profile.fovH;
+    applyFov();
   };
   $('btnSettings').onclick = () => {
     $('setName').value = profile.name;
-    $('setFov').value = profile.fov; $('fovVal').textContent = profile.fov;
+    $('setFov').value = profile.fovH; $('fovVal').textContent = profile.fovH;
     const g = $('colorGrid'); g.innerHTML = '';
     for (const c of COLORS) {
       const d = document.createElement('div');
@@ -798,8 +808,8 @@ canvas.addEventListener('click', () => {
 document.addEventListener('pointerlockchange', () => { S.locked = document.pointerLockElement === canvas; });
 addEventListener('mousemove', e => {
   if (!S.locked) return;
-  S.yaw -= e.movementX * 0.0024;
-  S.pitch = Math.max(-1.35, Math.min(1.35, S.pitch - e.movementY * 0.0022));
+  S.yaw -= e.movementX * 0.0027;
+  S.pitch = Math.max(-1.35, Math.min(1.35, S.pitch - e.movementY * 0.0025));
 });
 // drag fallback when pointer lock is unavailable
 let dragXY = null;
@@ -1028,27 +1038,34 @@ function frame(nowMs) {
   hostTick(dt);
   if (answersDirty && t > answersDirty) { answersDirty = 0; S.net && S.net.send('answers', { filled: S.answers[S.myId] }); }
 
-  // movement: WASD relative to look direction, normalized diagonals, and a
-  // short accelerate/brake so walking feels weighty instead of instant
+  // movement: Minecraft-flavoured — walk ~4.3 u/s, hold SHIFT to sprint with
+  // a smooth FOV kick, normalized diagonals, snappy accelerate/brake
+  S.sprinting = false;
   if (S.net && canWalk() && !S.expelled[S.myId] && t > S.stun && t > S.stuck) {
-    const sp = isTeacher() ? 3.5 : 3.2;
+    const sprint = S.keys.ShiftLeft || S.keys.ShiftRight;
+    const sp = (isTeacher() ? 4.4 : 4.2) * (sprint ? 1.35 : 1);
     let ix = 0, iz = 0;
     if (S.keys.KeyW) { ix -= Math.sin(S.yaw); iz -= Math.cos(S.yaw); }
     if (S.keys.KeyS) { ix += Math.sin(S.yaw); iz += Math.cos(S.yaw); }
     if (S.keys.KeyA) { ix -= Math.cos(S.yaw); iz += Math.sin(S.yaw); }
     if (S.keys.KeyD) { ix += Math.cos(S.yaw); iz -= Math.sin(S.yaw); }
     const il = Math.hypot(ix, iz);
-    const k = Math.min(1, dt * 14);
+    S.sprinting = !!(il && sprint);
+    const k = Math.min(1, dt * 20);
     S.vx += ((il ? ix / il * sp : 0) - S.vx) * k;
     S.vz += ((il ? iz / il * sp : 0) - S.vz) * k;
     if (Math.hypot(S.vx, S.vz) > 0.12) {
       S.me.x += S.vx * dt; S.me.z += S.vz * dt;
       const p = { x: S.me.x, z: S.me.z }; collide(p); S.me.x = p.x; S.me.z = p.z;
       S.me.yaw = Math.atan2(-S.vx, -S.vz) + Math.PI;   // avatar faces where it walks
+      S.bobPh = (S.bobPh || 0) + Math.hypot(S.vx, S.vz) * dt * 1.9;
     } else { S.vx = 0; S.vz = 0; }
     S.me.walk = il ? 1 : 0;
     if (t > S.poseAt) { S.poseAt = t + 0.11; S.net.send('pose', { x: S.me.x, z: S.me.z, yaw: S.yaw, walk: S.me.walk }); }
   }
+  // sprint FOV kick eases in and out
+  const kick = S.sprinting ? 11 : 0;
+  if (Math.abs(fovKick - kick) > 0.2) { fovKick += (kick - fovKick) * Math.min(1, dt * 7); applyFov(); }
 
   // figures
   for (const p of (S.roster || [])) {
@@ -1070,7 +1087,7 @@ function frame(nowMs) {
     } else if (pose && pose.x !== undefined) {
       f.group.position.y = 0;
       f.setPos(pose.x, pose.z, pose.yaw || 0);
-      if (pose.walk) { S.walkPh[p.id] = (S.walkPh[p.id] || 0) + dt * 7; f.walk(S.walkPh[p.id]); }
+      if (pose.walk) { S.walkPh[p.id] = (S.walkPh[p.id] || 0) + dt * 8.5; f.walk(S.walkPh[p.id]); }
       else f.stand();
     }
     f.idle(t); f.tickGesture(t);
@@ -1082,15 +1099,20 @@ function frame(nowMs) {
     camera.position.set(Math.sin(a) * 9, 4.6, Math.cos(a) * 9);
     camera.lookAt(0, 1.0, -1);
   } else {
-    let ex, ey, ez;
+    let ex, ey, ez, roll = 0;
     if (S.expelled[S.myId]) { ex = STOOL.x; ey = 1.42; ez = STOOL.z; }
-    else if (canWalk()) { ex = S.me.x; ey = 1.42; ez = S.me.z; }
-    else { const d = DESKS[mySeat() ?? 0]; ex = d.x; ey = 1.38; ez = d.z + 0.15; }
+    else if (canWalk()) {
+      // Minecraft-style view bob while moving
+      const spd = Math.min(1, Math.hypot(S.vx, S.vz) / 3.5);
+      ex = S.me.x; ey = 1.42 + Math.sin((S.bobPh || 0) * 2) * 0.021 * spd; ez = S.me.z;
+      roll = Math.sin(S.bobPh || 0) * 0.0045 * spd;
+    } else { const d = DESKS[mySeat() ?? 0]; ex = d.x; ey = 1.38; ez = d.z + 0.15; }
     camera.position.set(ex, ey, ez);
     camera.rotation.set(0, 0, 0, 'YXZ');
     camera.rotation.order = 'YXZ';
     camera.rotation.y = S.yaw;
     camera.rotation.x = S.pitch;
+    camera.rotation.z = roll;
     computePrompt();
   }
 
