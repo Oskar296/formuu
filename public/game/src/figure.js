@@ -21,9 +21,11 @@ function sdEll(px, py, pz, cx, cy, cz, rx, ry, rz) {
   return k1 === 0 ? -Math.min(rx, ry, rz) : k0 * (k0 - 1) / k1;
 }
 function bodySDF(x, y, z) {
-  let d = sdEll(x, y, z, 0, 1.19, 0, 0.18, 0.20, 0.158);           // chest
-  d = smin(d, sdEll(x, y, z, 0, 0.95, 0, 0.195, 0.215, 0.18), 0.13); // belly
-  d = smin(d, sdEll(x, y, z, 0, 0.76, 0, 0.155, 0.13, 0.145), 0.07); // pelvis fill
+  // torso flows into the hips as ONE column: same width top to bottom, wide
+  // blends so there is no visible belly/pelvis step
+  let d = sdEll(x, y, z, 0, 1.19, 0, 0.185, 0.20, 0.162);            // chest
+  d = smin(d, sdEll(x, y, z, 0, 0.97, 0, 0.19, 0.20, 0.172), 0.16);  // belly
+  d = smin(d, sdEll(x, y, z, 0, 0.79, 0, 0.185, 0.155, 0.165), 0.14); // hips (same width)
   d = smin(d, sdSeg(x, y, z, 0, 1.29, 0, 0, 1.43, 0, 0.105, 0.09), 0.09);  // neck
   d = smin(d, sdEll(x, y, z, 0, 1.56, 0, 0.183, 0.226, 0.18), 0.055);       // egg head
   for (const s of [-1, 1]) {
@@ -119,51 +121,19 @@ export function bakeFigure(res = 112) {
   return geo;
 }
 
-// accessory meshes parented to the head bone (skins)
-function accessory(kind, tint) {
-  const g = new THREE.Group();
-  const m = (c, r = 0.6) => new THREE.MeshStandardMaterial({ color: c, roughness: r });
-  if (kind === 'cap') {
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.20, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.45), m('#2e5a8a'));
-    dome.position.y = 0.30; g.add(dome);
-    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.025, 16, 1, false, -Math.PI * 0.5, Math.PI), m('#2e5a8a'));
-    brim.position.set(0, 0.32, -0.14); g.add(brim);
-  } else if (kind === 'beanie') {
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.205, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), m('#c05050', 0.9));
-    dome.position.y = 0.28; g.add(dome);
-    const pom = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), m('#f0ede0', 0.95));
-    pom.position.y = 0.47; g.add(pom);
-  } else if (kind === 'glasses') {
-    const dark = m('#20242c', 0.35);
-    for (const sx of [-1, 1]) {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.011, 6, 14), dark);
-      ring.position.set(sx * 0.075, 0.20, -0.155); g.add(ring);
-    }
-    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.012, 0.012), dark);
-    bridge.position.set(0, 0.21, -0.165); g.add(bridge);
-  } else if (kind === 'crown') {
-    const gold = m('#e8bc3a', 0.3); gold.metalness = 0.6;
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.145, 0.07, 12, 1, true), gold);
-    ring.position.y = 0.40; g.add(ring);
-    for (let i = 0; i < 5; i++) {
-      const a = i / 5 * Math.PI * 2;
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.026, 0.07, 5), gold);
-      spike.position.set(Math.cos(a) * 0.13, 0.46, Math.sin(a) * 0.13); g.add(spike);
-    }
-  } else if (kind === 'mohawk') {
-    for (let i = 0; i < 4; i++) {
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.16, 6), m('#d94a9a', 0.8));
-      spike.position.set(0, 0.40, -0.10 + i * 0.075); spike.rotation.x = -0.25 + i * 0.16; g.add(spike);
-    }
-  } else if (kind === 'antenna') {
-    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.16, 6), m('#2a2a32', 0.4));
-    rod.position.y = 0.48; g.add(rod);
-    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8),
-      new THREE.MeshStandardMaterial({ color: '#ff5040', emissive: '#ff2010', emissiveIntensity: 1.4 }));
-    bulb.position.y = 0.57; g.add(bulb);
+// no cosmetics: identity is COLOR, Among-Us style. What figures do carry are
+// physical cheat props — a held-up paper and ink scribbled on the forearm.
+function scribbleTex() {
+  const cv = document.createElement('canvas'); cv.width = 96; cv.height = 64;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#f6f1e0'; c.fillRect(0, 0, 96, 64);
+  c.strokeStyle = '#2a2a3a'; c.lineWidth = 3; c.lineCap = 'round';
+  for (let i = 0; i < 4; i++) {
+    c.beginPath(); c.moveTo(10, 14 + i * 13);
+    c.bezierCurveTo(30, 8 + i * 13 + Math.random() * 8, 60, 16 + i * 13, 86, 12 + i * 13);
+    c.stroke();
   }
-  if (tint) g.traverse(o => { if (o.isMesh && kind === 'cap') o.material.color.set(tint); });
-  return g;
+  return new THREE.CanvasTexture(cv);
 }
 
 function nameSprite(text, bg) {
@@ -182,7 +152,7 @@ function nameSprite(text, bg) {
 }
 
 // One figure instance: shared geometry, own skeleton, own tint.
-export function makeFigure(scene, { color = '#eef0f2', name = '', tag = null, acc = null, scale = 1 } = {}) {
+export function makeFigure(scene, { color = '#eef0f2', name = '', tag = null, scale = 1 } = {}) {
   const geo = bakeFigure();
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
   const mesh = new THREE.SkinnedMesh(geo, mat);
@@ -199,7 +169,6 @@ export function makeFigure(scene, { color = '#eef0f2', name = '', tag = null, ac
   g.add(mesh);
   g.scale.setScalar(scale);
   const B = {}; SEGS.forEach((S, i) => (B[S[0]] = bones[i]));
-  if (acc) bones[IDX.head].add(accessory(acc, null));
   let sprite = null;
   if (name) { sprite = nameSprite(name, tag); sprite.position.y = 2.05; g.add(sprite); }
   // soft blob shadow
@@ -253,13 +222,38 @@ export function makeFigure(scene, { color = '#eef0f2', name = '', tag = null, ac
     lookYaw(y) { B.head.rotation.y = Math.max(-0.9, Math.min(0.9, y)); },
     lean(l) { B.spine.rotation.z = -l * 0.35; },
     raiseHand(on) { B.armRu.rotation.x = on ? Math.PI * 0.95 : 0.55; },
+    // PROOF props: the world shows the cheating
+    holdPaper(sec, nowT) {                       // flashes a real sheet overhead
+      if (!this._paper) {
+        this._paper = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.44),
+          new THREE.MeshStandardMaterial({ map: scribbleTex(), side: THREE.DoubleSide, roughness: 0.9 }));
+        this._paper.position.set(0, -0.42, -0.06);
+        this._paper.rotation.y = Math.PI;
+        B.armRu.add(this._paper);
+      }
+      this._paper.visible = true;
+      this._paperUntil = nowT + sec;
+      this.raiseHand(true);
+    },
+    inkArm() {                                    // visible scribbles on the forearm
+      if (this._ink) return;
+      this._ink = new THREE.Mesh(new THREE.PlaneGeometry(0.11, 0.2),
+        new THREE.MeshBasicMaterial({ map: scribbleTex(), transparent: false }));
+      this._ink.position.set(-0.075, -0.22, -0.01);
+      this._ink.rotation.y = -Math.PI / 2;
+      B.armLf.add(this._ink);
+    },
+    clearInk() { if (this._ink) { B.armLf.remove(this._ink); this._ink = null; } },
     setGesture(text, dur, now, bg) {
       if (gesture) { g.remove(gesture); gesture = null; }
       gesture = nameSprite(text, bg || 'rgba(30,60,140,0.8)');
       gesture.position.y = 2.45; gesture.scale.set(1.9, 0.475, 1);
       g.add(gesture); gestureUntil = now + dur;
     },
-    tickGesture(now) { if (gesture && now > gestureUntil) { g.remove(gesture); gesture = null; } },
+    tickGesture(now) {
+      if (gesture && now > gestureUntil) { g.remove(gesture); gesture = null; }
+      if (this._paper && this._paper.visible && now > this._paperUntil) { this._paper.visible = false; this.raiseHand(false); }
+    },
     setVisible(v) { g.visible = v; },
     dispose() { scene.remove(g); },
   };

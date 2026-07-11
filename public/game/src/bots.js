@@ -7,14 +7,15 @@ import { DESKS, TEACHER_DESK, BOARD, ROOM } from './classroom.js';
 import { N_QUESTIONS } from './exam.js';
 
 export const BOT_NAMES = ['Mia', 'Leo', 'Ava', 'Max', 'Zoe', 'Sam', 'Ivy', 'Kai', 'Nia', 'Ben', 'Uma', 'Rex'];
-const BOT_SKINS = ['chalk', 'mint', 'skater', 'bench', 'calc', 'detention'];
+const BOT_COLORS = ['red', 'blue', 'green', 'pink', 'orange', 'yellow', 'purple', 'brown', 'cyan', 'lime', 'black'];
 
-export function makeBots(count, role) {
+export function makeBots(count, role, takenColor) {
   const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
+  const cols = BOT_COLORS.filter(c => c !== takenColor);
   const out = [];
   for (let i = 0; i < count; i++)
     out.push({ id: 'bot-' + Math.random().toString(36).slice(2, 8), name: names[i],
-      role, skin: BOT_SKINS[i % BOT_SKINS.length], joinedAt: Date.now() + 1 + i, bot: true });
+      role, color: cols[i % cols.length], joinedAt: Date.now() + 1 + i, bot: true });
   return out;
 }
 
@@ -93,7 +94,7 @@ export class BotBrain {
         c.fillStyle = '#f6f1e0'; c.fillRect(0, 0, 180, 120);
         c.fillStyle = '#2a2a3a'; c.font = 'bold 60px system-ui'; c.textAlign = 'center';
         c.fillText(['?', 'B!', '3=C', 'idk', ':)'][Math.random() * 5 | 0], 90, 78);
-        this.net.sendAs(p.id, 'throw', { to: target.id, img: cv.toDataURL('image/png') });
+        this.net.sendAs(p.id, 'throw', { id: 'nt-' + Math.random().toString(36).slice(2, 7), to: target.id, img: cv.toDataURL('image/png') });
       }
       else if (roll < 0.85) this.net.sendAs(p.id, 'act', { type: 'cough' });
       else this.net.sendAs(p.id, 'act', { type: 'tap' });
