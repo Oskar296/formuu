@@ -48,7 +48,7 @@ const S = {
   items: new Map(),                     // rare cheat items spawned around the room
   standing: false, standingSet: {}, lastOOS: {}, hasMirror: false, hasCushion: false,
   attach: {}, myTrapUsed: false, myNoteUsed: false,
-  me: { x: 4, z: 6, yaw: Math.PI, walk: 0 }, stun: 0, stuck: 0, keys: {},
+  me: { x: 4, z: 6, yaw: Math.PI, walk: 0 }, vx: 0, vz: 0, stun: 0, stuck: 0, keys: {},
   yaw: Math.PI, pitch: 0, locked: false,
   hotSel: -1, armedThrow: null, sheetOpen: true,
   poseAt: 0, resultsSent: false, handLure: null, ringingUntil: 0, ringingId: null,
@@ -529,7 +529,7 @@ function startRound(data) {
   S.stun = 0; S.stuck = 0; S.ringingId = null; S.ringingUntil = 0;
   S.hotSel = -1; S.armedThrow = null; S.sheetOpen = true;
   S.standing = false; S.standingSet = {}; S.lastOOS = {};
-  S.hasMirror = false; S.hasCushion = false;
+  S.hasMirror = false; S.hasCushion = false; S.vx = 0; S.vz = 0;
   for (const pid in S.seats) S.answers[pid] = Array(N_QUESTIONS).fill(null);
   clearRound(false);
   bots.reset();
@@ -845,13 +845,13 @@ function toggleSeat() {
   const d = DESKS[seat];
   if (!S.standing) {
     S.standing = true;
-    S.me.x = d.x; S.me.z = d.z + 1.0;
+    S.me.x = d.x; S.me.z = d.z + 1.0; S.vx = 0; S.vz = 0;
     act('stand');
     show('sheet', false);
     toast('🪑 you are OUT OF YOUR SEAT — the teacher can accuse you on sight!', 'red');
   } else if (Math.hypot(S.me.x - d.x, S.me.z - (d.z + 0.15)) < 1.5) {
     S.standing = false;
-    S.me.x = d.x; S.me.z = d.z + 0.15; S.me.walk = 0;
+    S.me.x = d.x; S.me.z = d.z + 0.15; S.me.walk = 0; S.vx = 0; S.vz = 0;
     act('sit');
     show('sheet', S.sheetOpen);
   } else toast('get back to YOUR seat to sit down (SPACE)', 'red');
@@ -1013,21 +1013,25 @@ function frame(nowMs) {
   hostTick(dt);
   if (answersDirty && t > answersDirty) { answersDirty = 0; S.net && S.net.send('answers', { filled: S.answers[S.myId] }); }
 
-  // movement (WASD relative to look direction)
+  // movement: WASD relative to look direction, normalized diagonals, and a
+  // short accelerate/brake so walking feels weighty instead of instant
   if (S.net && canWalk() && !S.expelled[S.myId] && t > S.stun && t > S.stuck) {
-    const sp = (isTeacher() ? 3.3 : 3.0) * dt;
-    let mx = 0, mz = 0;
-    if (S.keys.KeyW) { mx -= Math.sin(S.yaw) * sp; mz -= Math.cos(S.yaw) * sp; }
-    if (S.keys.KeyS) { mx += Math.sin(S.yaw) * sp; mz += Math.cos(S.yaw) * sp; }
-    if (S.keys.KeyA) { mx -= Math.cos(S.yaw) * sp; mz += Math.sin(S.yaw) * sp; }
-    if (S.keys.KeyD) { mx += Math.cos(S.yaw) * sp; mz -= Math.sin(S.yaw) * sp; }
-    const moving = mx || mz;
-    if (moving) {
-      S.me.x += mx; S.me.z += mz;
+    const sp = isTeacher() ? 3.5 : 3.2;
+    let ix = 0, iz = 0;
+    if (S.keys.KeyW) { ix -= Math.sin(S.yaw); iz -= Math.cos(S.yaw); }
+    if (S.keys.KeyS) { ix += Math.sin(S.yaw); iz += Math.cos(S.yaw); }
+    if (S.keys.KeyA) { ix -= Math.cos(S.yaw); iz += Math.sin(S.yaw); }
+    if (S.keys.KeyD) { ix += Math.cos(S.yaw); iz -= Math.sin(S.yaw); }
+    const il = Math.hypot(ix, iz);
+    const k = Math.min(1, dt * 14);
+    S.vx += ((il ? ix / il * sp : 0) - S.vx) * k;
+    S.vz += ((il ? iz / il * sp : 0) - S.vz) * k;
+    if (Math.hypot(S.vx, S.vz) > 0.12) {
+      S.me.x += S.vx * dt; S.me.z += S.vz * dt;
       const p = { x: S.me.x, z: S.me.z }; collide(p); S.me.x = p.x; S.me.z = p.z;
-      S.me.yaw = Math.atan2(-mx, -mz) + Math.PI;   // avatar faces where it walks
-    }
-    S.me.walk = moving ? 1 : 0;
+      S.me.yaw = Math.atan2(-S.vx, -S.vz) + Math.PI;   // avatar faces where it walks
+    } else { S.vx = 0; S.vz = 0; }
+    S.me.walk = il ? 1 : 0;
     if (t > S.poseAt) { S.poseAt = t + 0.11; S.net.send('pose', { x: S.me.x, z: S.me.z, yaw: S.yaw, walk: S.me.walk }); }
   }
 
