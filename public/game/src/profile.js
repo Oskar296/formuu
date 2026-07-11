@@ -18,6 +18,8 @@ function load() {
   if (!P || typeof P !== 'object') P = {};
   P.name = P.name || '';
   if (!COLORS.some(c => c.id === P.color)) P.color = COLORS[(Math.random() * COLORS.length) | 0].id;
+  P.fov = Math.round(+P.fov);
+  if (!(P.fov >= 60 && P.fov <= 110)) P.fov = 85;
   return P;
 }
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(P)); } catch { /* private mode */ } };
@@ -27,4 +29,6 @@ export const profile = {
   set name(v) { load().name = String(v).slice(0, 14); save(); },
   get color() { return load().color; },
   set color(v) { if (COLORS.some(c => c.id === v)) { load().color = v; save(); } },
+  get fov() { return load().fov; },
+  set fov(v) { v = Math.round(+v); if (v >= 60 && v <= 110) { load().fov = v; save(); } },
 };

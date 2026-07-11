@@ -219,15 +219,26 @@ export function lights(scene) {
   scene.add(new THREE.AmbientLight('#b8c0d4', 0.4));
 }
 
-// keep a walking body out of desks/furniture
-export function collide(pos) {
-  pos.x = Math.max(-ROOM.x + 0.4, Math.min(ROOM.x - 0.4, pos.x));
-  pos.z = Math.max(-ROOM.z + 0.4, Math.min(ROOM.z - 0.4, pos.z));
-  const push = (cx, cz, r) => {
-    const dx = pos.x - cx, dz = pos.z - cz, d = Math.hypot(dx, dz);
-    if (d < r && d > 1e-4) { pos.x = cx + dx / d * r; pos.z = cz + dz / d * r; }
-  };
-  for (const d of DESKS) { push(d.x, d.deskZ, 1.15); push(d.x, d.z + 0.15, 0.6); }
-  push(TEACHER_DESK.x, TEACHER_DESK.z, 1.6);
-  push(STOOL.x, STOOL.z, 0.5);
+// keep a walking body out of desks/furniture. Obstacles are tight rectangles
+// matching the actual furniture footprints (no invisible force fields), and
+// the push-out is along the shallow axis so you slide along edges naturally.
+const OBS = [];
+for (const d of DESKS) {
+  OBS.push({ x: d.x, z: d.deskZ, hx: 0.85, hz: 0.5 });     // desk top
+  OBS.push({ x: d.x, z: d.z + 0.2, hx: 0.44, hz: 0.42 });  // chair
+}
+OBS.push({ x: TEACHER_DESK.x, z: TEACHER_DESK.z, hx: 1.3, hz: 0.55 });
+export function collide(pos, r = 0.26) {
+  // walls sit at ±(ROOM+0.5); walk right up to them
+  pos.x = Math.max(-ROOM.x - 0.5 + r + 0.06, Math.min(ROOM.x + 0.5 - r - 0.06, pos.x));
+  pos.z = Math.max(-ROOM.z - 0.5 + r + 0.06, Math.min(ROOM.z + 0.5 - r - 0.06, pos.z));
+  for (const o of OBS) {
+    const dx = pos.x - o.x, dz = pos.z - o.z;
+    const px = o.hx + r - Math.abs(dx), pz = o.hz + r - Math.abs(dz);
+    if (px <= 0 || pz <= 0) continue;
+    if (px < pz) pos.x = o.x + (dx < 0 ? -1 : 1) * (o.hx + r);
+    else pos.z = o.z + (dz < 0 ? -1 : 1) * (o.hz + r);
+  }
+  const sx = pos.x - STOOL.x, sz = pos.z - STOOL.z, sd = Math.hypot(sx, sz);
+  if (sd < 0.36 + r && sd > 1e-4) { pos.x = STOOL.x + sx / sd * (0.36 + r); pos.z = STOOL.z + sz / sd * (0.36 + r); }
 }

@@ -29,7 +29,7 @@ renderer.toneMappingExposure = 1.05;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#cfd8e4');
 scene.fog = new THREE.Fog('#cfd8e4', 24, 46);
-const camera = new THREE.PerspectiveCamera(72, 1, 0.05, 90);
+const camera = new THREE.PerspectiveCamera(profile.fov, 1, 0.05, 90);
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 lights(scene);
@@ -48,7 +48,7 @@ const S = {
   items: new Map(),                     // rare cheat items spawned around the room
   standing: false, standingSet: {}, lastOOS: {}, hasMirror: false, hasCushion: false,
   attach: {}, myTrapUsed: false, myNoteUsed: false,
-  me: { x: 4, z: 6, yaw: Math.PI, walk: 0 }, stun: 0, stuck: 0, keys: {},
+  me: { x: 4, z: 6, yaw: Math.PI, walk: 0 }, vx: 0, vz: 0, stun: 0, stuck: 0, keys: {},
   yaw: Math.PI, pitch: 0, locked: false,
   hotSel: -1, armedThrow: null, sheetOpen: true,
   poseAt: 0, resultsSent: false, handLure: null, ringingUntil: 0, ringingId: null,
@@ -73,9 +73,16 @@ function toast(msg, cls = '') {
 }
 let bannerT = 0;
 function banner(msg, ms = 2600) { const b = $('banner'); b.textContent = msg; b.style.opacity = 1; clearTimeout(bannerT); bannerT = setTimeout(() => (b.style.opacity = 0), ms); }
-function viewer(title, img) { $('viewerTitle').textContent = title; $('viewerImg').src = img; $('viewer').classList.remove('hidden'); }
+function viewer(title, img) {
+  // free the mouse so the pop-up can actually be closed while pointer-locked
+  document.exitPointerLock && document.exitPointerLock();
+  $('viewerTitle').textContent = title; $('viewerImg').src = img; $('viewer').classList.remove('hidden');
+}
 $('viewerClose').onclick = () => $('viewer').classList.add('hidden');
+$('viewer').addEventListener('pointerup', e => { if (e.target.id === 'viewer') $('viewer').classList.add('hidden'); });
+$('help').addEventListener('pointerup', e => { if (e.target.id === 'help') $('help').classList.add('hidden'); });
 const show = (id, v) => $(id).classList.toggle('hidden', !v);
+const modalOpen = () => ['viewer', 'scrib', 'help', 'settings'].some(id => !$(id).classList.contains('hidden'));
 
 function sheetImage(name, answers) {
   const cv = document.createElement('canvas'); cv.width = 340; cv.height = 300;
@@ -111,8 +118,14 @@ function refreshWho() {
     : 'Local mode: rooms work across TABS of this browser. Solo works everywhere.';
   $('soundBtn').onclick = () => ($('soundBtn').textContent = sfx.toggle() ? '🔇' : '🔊');
   // settings: username + color
+  $('setFov').oninput = () => {
+    profile.fov = +$('setFov').value;
+    $('fovVal').textContent = profile.fov;
+    camera.fov = profile.fov; camera.updateProjectionMatrix();
+  };
   $('btnSettings').onclick = () => {
     $('setName').value = profile.name;
+    $('setFov').value = profile.fov; $('fovVal').textContent = profile.fov;
     const g = $('colorGrid'); g.innerHTML = '';
     for (const c of COLORS) {
       const d = document.createElement('div');
@@ -323,7 +336,7 @@ function onEvent(ev) {
       break;
     }
     case 'throw': {
-      sfx.paper();
+      sfx.paper(volFor(from));
       logCheat(from, 'throwing a note', data.img);
       gesture(from, '🗒 yeet!');
       const targetSeat = S.seats[data.to];
@@ -415,16 +428,17 @@ function onEvent(ev) {
       const tr = S.traps.get(data.id); if (!tr || !tr.armed) break;
       tr.armed = false;
       const who = nameOf(tr.owner);
+      const tv = volAt(tr.pos[0], tr.pos[2]);
       if (tr.kind === 'marbles') {
-        sfx.crash(); removeTrap(data.id);
+        sfx.crash(tv); removeTrap(data.id);
         if (isTeacher()) { S.stun = now() + 2.2; banner('💫 MARBLES! WHO PUT MARBLES THERE?!'); }
         else banner(`💫 The teacher slipped on ${who}'s marbles!`);
       } else if (tr.kind === 'glue') {
-        sfx.squelch(); removeTrap(data.id);
+        sfx.squelch(tv); removeTrap(data.id);
         if (isTeacher()) { S.stuck = now() + 2.6; banner('🍯 YOUR SHOES ARE GLUED DOWN'); }
         else banner(`🍯 The teacher stepped in ${who}'s glue!`);
       } else if (tr.kind === 'pepper') {
-        sfx.sneeze(); removeTrap(data.id);
+        sfx.sneeze(tv); removeTrap(data.id);
         if (isTeacher()) { blind(2.6); banner('🤧 A PEPPER ERASER?! I CANNOT SEE!'); }
         else banner(`🤧 ${who}'s pepper eraser goes off!`);
       } else if (tr.kind === 'clock') {
@@ -432,7 +446,7 @@ function onEvent(ev) {
         sfx.startRing('clock');
         banner(isTeacher() ? '⏰ WHERE IS THAT RINGING?! Find it!' : '⏰ COVER NOISE — cheat freely!', 3000);
       } else if (tr.kind === 'cushion') {
-        sfx.honk(); removeTrap(data.id);
+        sfx.honk(volAt(tr.pos[0], tr.pos[2])); removeTrap(data.id);
         S.ringingUntil = Math.max(S.ringingUntil, now() + 6);   // the class is in stitches — cover noise
         banner(isTeacher() ? '💨 WHO PUT A WHOOPEE CUSHION THERE?!' : `💨 PFFFRT! ${nameOf(tr.owner)}'s cushion — cheat freely!`, 3000);
         sfx.laugh();
@@ -456,6 +470,20 @@ function onEvent(ev) {
     case 'results': showResults(data); break;
   }
 }
+// how loud someone's noise is for ME: full volume up close, a murmur across
+// the room. This is what keeps nine cheating bots from being a wall of sound.
+function volFor(pid) {
+  if (pid === S.myId) return 1;
+  let px, pz;
+  const pose = S.poses[pid];
+  if (pose && pose.x !== undefined && S.standingSet[pid]) { px = pose.x; pz = pose.z; }
+  else if (S.seats[pid] != null) { const d = DESKS[S.seats[pid]]; px = d.x; pz = d.z; }
+  else if (pose && pose.x !== undefined) { px = pose.x; pz = pose.z; }
+  else return 0.5;
+  const d = Math.hypot(px - S.me.x, pz - S.me.z);
+  return Math.max(0.06, Math.min(1, 1.9 / (1 + d)));
+}
+const volAt = (x, z) => Math.max(0.12, Math.min(1, 2.4 / (1 + Math.hypot(x - S.me.x, z - S.me.z))));
 function handleAct(from, a) {
   switch (a.type) {
     case 'signal': logCheat(from, 'hand signals');
@@ -478,13 +506,13 @@ function handleAct(from, a) {
       if (from === S.myId && (S.attach[from] || {}).bottle) viewer('🍼 Your bottle label:', S.attach[from].bottle);
       break;
     case 'readNote': logCheat(from, 'reading a hidden note'); gesture(from, '🤫 reaches under the desk'); break;
-    case 'tap': sfx.tap(); logBurst(from, 'tapping in code'); gesture(from, '👇 tap'); break;
-    case 'cough': sfx.cough(); logBurst(from, 'coughing in code'); gesture(from, '😷 KHM!'); break;
+    case 'tap': sfx.tap(volFor(from)); logBurst(from, 'tapping in code'); gesture(from, '👇 tap'); break;
+    case 'cough': sfx.cough(volFor(from)); logBurst(from, 'coughing in code'); gesture(from, '😷 KHM!'); break;
     case 'raise': gesture(from, '✋ SIR!'); S.handLure = { pid: from, until: now() + 6 };
       if (S.figures[from]) { S.figures[from].raiseHand(true); setTimeout(() => S.figures[from] && S.figures[from].raiseHand(false), 2500); }
       break;
-    case 'stand': S.standingSet[from] = true; sfx.scrape(); gesture(from, '🪑 stands up!', 'rgba(140,60,20,0.8)'); break;
-    case 'sit': delete S.standingSet[from]; sfx.scrape(); break;
+    case 'stand': S.standingSet[from] = true; sfx.scrape(volFor(from)); gesture(from, '🪑 stands up!', 'rgba(140,60,20,0.8)'); break;
+    case 'sit': delete S.standingSet[from]; sfx.scrape(volFor(from) * 0.7); break;
   }
 }
 function handleVerdict(v) {
@@ -516,7 +544,7 @@ function startRound(data) {
   S.stun = 0; S.stuck = 0; S.ringingId = null; S.ringingUntil = 0;
   S.hotSel = -1; S.armedThrow = null; S.sheetOpen = true;
   S.standing = false; S.standingSet = {}; S.lastOOS = {};
-  S.hasMirror = false; S.hasCushion = false;
+  S.hasMirror = false; S.hasCushion = false; S.vx = 0; S.vz = 0;
   for (const pid in S.seats) S.answers[pid] = Array(N_QUESTIONS).fill(null);
   clearRound(false);
   bots.reset();
@@ -563,7 +591,11 @@ function setPhase(phase, endsAt) {
   show('crosshair', true); show('helpTip', true);
   $('phaseLabel').textContent = phase === 'prep' ? 'PREP — RIG THE ROOM' : phase === 'inspect' ? 'INSPECTION' : phase === 'exam' ? 'THE EXAM — DO NOT GET CAUGHT' : phase.toUpperCase();
   if (phase === 'inspect' || phase === 'exam') sfx.bell();
-  if (phase === 'exam') banner(S.exam ? `📝 Subject: the Republic of ${S.exam.country}` : '📝 BEGIN!', 3000);
+  if (phase === 'exam') {
+    banner(S.exam ? `📝 Subject: the Republic of ${S.exam.country}` : '📝 BEGIN!', 3000);
+    // the paper starts in your hands — free the mouse so answers are clickable
+    if (stud && S.sheetOpen && mySeat() != null) document.exitPointerLock && document.exitPointerLock();
+  }
   if (phase === 'prep') banner(stud ? '🛠 RIG THE ROOM — the teacher isn\'t here yet' : '👀 the class is up to something…', 3000);
   refreshHotbar();
 }
@@ -703,6 +735,17 @@ function refreshSheet() {
     [...d.querySelector('.opts').children].forEach((b, oi) => b.classList.toggle('pick', mine[qi] === oi));
   });
 }
+// picking the paper up frees the mouse (to click answers); putting it down
+// grabs the mouse again — same rhythm as Minecraft's inventory
+function setSheet(open) {
+  S.sheetOpen = open;
+  show('sheet', open && S.phase === 'exam' && !isTeacher() && mySeat() != null);
+  if (open) document.exitPointerLock && document.exitPointerLock();
+  else if (!modalOpen()) {
+    const p = canvas.requestPointerLock && canvas.requestPointerLock();
+    if (p && p.catch) p.catch(() => {});
+  }
+}
 let answersDirty = 0;
 function setAnswer(q, a, sync = true) {
   if (S.expelled[S.myId]) return;
@@ -771,8 +814,21 @@ addEventListener('pointerup', () => (dragXY = null));
 
 addEventListener('keydown', e => {
   S.keys[e.code] = true;
-  if (e.code === 'Tab') { e.preventDefault(); if (S.phase === 'exam' && !isTeacher()) { S.sheetOpen = !S.sheetOpen; show('sheet', S.sheetOpen && mySeat() != null); } }
-  if (e.code === 'KeyH') $('help').classList.toggle('hidden');
+  // pop-ups swallow game keys — E / ESC / Enter / Space close them
+  if (!$('viewer').classList.contains('hidden')) {
+    if (['Escape', 'KeyE', 'Enter', 'Space'].includes(e.code)) { e.preventDefault(); $('viewer').classList.add('hidden'); }
+    return;
+  }
+  if (!$('scrib').classList.contains('hidden')) {
+    if (e.code === 'Escape') { show('scrib', false); scribCb = null; }
+    return;
+  }
+  if (!$('help').classList.contains('hidden')) {
+    if (e.code === 'KeyH' || e.code === 'Escape') $('help').classList.add('hidden');
+    return;
+  }
+  if (e.code === 'Tab') { e.preventDefault(); if (S.phase === 'exam' && !isTeacher() && mySeat() != null) setSheet(!S.sheetOpen); }
+  if (e.code === 'KeyH') $('help').classList.remove('hidden');
   const k = e.key;
   if (S.phase === 'prep' && !isTeacher() && '12345'.includes(k)) selectHot(+k - 1);
   if (S.phase === 'exam' && !isTeacher() && !S.expelled[S.myId] && mySeat() != null) {
@@ -791,8 +847,8 @@ addEventListener('keyup', e => (S.keys[e.code] = false));
 addEventListener('pointerup', e => {
   // clicks act on the crosshair target when locked; when unlocked a plain
   // click (no drag) does the same via the cursor ray
-  if (e.target !== canvas) return;
-  if (S.prompt && (S.locked || true)) S.prompt.run();
+  if (e.target !== canvas || modalOpen()) return;
+  if (S.prompt) S.prompt.run();
 });
 function act(type, extra = {}) {
   if (isTeacher() || S.phase !== 'exam' || S.expelled[S.myId]) return;
@@ -804,13 +860,13 @@ function toggleSeat() {
   const d = DESKS[seat];
   if (!S.standing) {
     S.standing = true;
-    S.me.x = d.x; S.me.z = d.z + 1.0;
+    S.me.x = d.x; S.me.z = d.z + 1.0; S.vx = 0; S.vz = 0;
     act('stand');
     show('sheet', false);
     toast('🪑 you are OUT OF YOUR SEAT — the teacher can accuse you on sight!', 'red');
   } else if (Math.hypot(S.me.x - d.x, S.me.z - (d.z + 0.15)) < 1.5) {
     S.standing = false;
-    S.me.x = d.x; S.me.z = d.z + 0.15; S.me.walk = 0;
+    S.me.x = d.x; S.me.z = d.z + 0.15; S.me.walk = 0; S.vx = 0; S.vz = 0;
     act('sit');
     show('sheet', S.sheetOpen);
   } else toast('get back to YOUR seat to sit down (SPACE)', 'red');
@@ -918,7 +974,7 @@ function computePrompt() {
             }
           } else if (deskIdx === seat && !S.standing && dist < 3.4) {
             set('📄 CLICK — ' + (S.sheetOpen ? 'put your paper down (TAB)' : 'pick up your paper (TAB)'),
-              () => { S.sheetOpen = !S.sheetOpen; show('sheet', S.sheetOpen); });
+              () => setSheet(!S.sheetOpen));
           }
         }
       }
@@ -972,21 +1028,25 @@ function frame(nowMs) {
   hostTick(dt);
   if (answersDirty && t > answersDirty) { answersDirty = 0; S.net && S.net.send('answers', { filled: S.answers[S.myId] }); }
 
-  // movement (WASD relative to look direction)
+  // movement: WASD relative to look direction, normalized diagonals, and a
+  // short accelerate/brake so walking feels weighty instead of instant
   if (S.net && canWalk() && !S.expelled[S.myId] && t > S.stun && t > S.stuck) {
-    const sp = (isTeacher() ? 3.3 : 3.0) * dt;
-    let mx = 0, mz = 0;
-    if (S.keys.KeyW) { mx -= Math.sin(S.yaw) * sp; mz -= Math.cos(S.yaw) * sp; }
-    if (S.keys.KeyS) { mx += Math.sin(S.yaw) * sp; mz += Math.cos(S.yaw) * sp; }
-    if (S.keys.KeyA) { mx -= Math.cos(S.yaw) * sp; mz += Math.sin(S.yaw) * sp; }
-    if (S.keys.KeyD) { mx += Math.cos(S.yaw) * sp; mz -= Math.sin(S.yaw) * sp; }
-    const moving = mx || mz;
-    if (moving) {
-      S.me.x += mx; S.me.z += mz;
+    const sp = isTeacher() ? 3.5 : 3.2;
+    let ix = 0, iz = 0;
+    if (S.keys.KeyW) { ix -= Math.sin(S.yaw); iz -= Math.cos(S.yaw); }
+    if (S.keys.KeyS) { ix += Math.sin(S.yaw); iz += Math.cos(S.yaw); }
+    if (S.keys.KeyA) { ix -= Math.cos(S.yaw); iz += Math.sin(S.yaw); }
+    if (S.keys.KeyD) { ix += Math.cos(S.yaw); iz -= Math.sin(S.yaw); }
+    const il = Math.hypot(ix, iz);
+    const k = Math.min(1, dt * 14);
+    S.vx += ((il ? ix / il * sp : 0) - S.vx) * k;
+    S.vz += ((il ? iz / il * sp : 0) - S.vz) * k;
+    if (Math.hypot(S.vx, S.vz) > 0.12) {
+      S.me.x += S.vx * dt; S.me.z += S.vz * dt;
       const p = { x: S.me.x, z: S.me.z }; collide(p); S.me.x = p.x; S.me.z = p.z;
-      S.me.yaw = Math.atan2(-mx, -mz) + Math.PI;   // avatar faces where it walks
-    }
-    S.me.walk = moving ? 1 : 0;
+      S.me.yaw = Math.atan2(-S.vx, -S.vz) + Math.PI;   // avatar faces where it walks
+    } else { S.vx = 0; S.vz = 0; }
+    S.me.walk = il ? 1 : 0;
     if (t > S.poseAt) { S.poseAt = t + 0.11; S.net.send('pose', { x: S.me.x, z: S.me.z, yaw: S.yaw, walk: S.me.walk }); }
   }
 
