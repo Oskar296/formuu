@@ -55,7 +55,7 @@ export class BotBrain {
           b.planted = true;
           const kinds = ['marbles', 'glue', 'pepper', 'clock'];
           const kind = kinds[(Math.random() * kinds.length) | 0];
-          const px = (Math.random() * 2 - 1) * 3, pz = -3 - Math.random() * 3;
+          const px = (Math.random() * 2 - 1) * ROOM.x * 0.45, pz = -ROOM.z * 0.3 - Math.random() * ROOM.z * 0.35;
           this.net.sendAs(p.id, 'trap', { id: 'tr-' + Math.random().toString(36).slice(2, 7), kind, pos: [px, 0, pz] });
         }
       }
@@ -137,9 +137,10 @@ export class BotBrain {
   teacher(p, now, dt) {
     const S = this.S;
     const tb = this.tb || (this.tb = { x: TEACHER_DESK.x, z: TEACHER_DESK.z + 1.3, yaw: 0, wp: 0, poseAt: 0, busyUntil: 0 });
+    const wx = ROOM.x - 2.6, wz = ROOM.z - 3.6;   // patrol scales with the map
     const WAY = [
-      { x: -4.5, z: -4.5 }, { x: 4.5, z: -4.5 }, { x: 4.5, z: 0 }, { x: -4.5, z: 0 },
-      { x: -4.5, z: 4.5 }, { x: 4.5, z: 4.5 }, { x: 0, z: -4 },
+      { x: -wx, z: -wz }, { x: wx, z: -wz }, { x: wx, z: 0 }, { x: -wx, z: 0 },
+      { x: -wx, z: wz }, { x: wx, z: wz }, { x: 0, z: -wz * 0.9 },
     ];
     if (S.phase !== 'exam' && S.phase !== 'inspect') return;
     let goal = WAY[tb.wp];

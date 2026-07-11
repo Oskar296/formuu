@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { buildClassroom, lights, collide, DESKS, TEACHER_DESK, BOARD, STOOL, ROOM, seatAdjacent } from './src/classroom.js';
+import { buildWorld, MAPS, lights, collide, DESKS, TEACHER_DESK, BOARD, STOOL, ROOM, seatAdjacent } from './src/classroom.js';
 import { makeFigure, bakeFigure } from './src/figure.js';
 import { generateExam, dealKnowledge, score, N_QUESTIONS, LETTERS } from './src/exam.js';
 import { makeNet, onlineAvailable, makeId } from './src/net.js';
@@ -43,7 +43,7 @@ function applyFov() {
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; applyFov(); }
 addEventListener('resize', resize); resize();
 lights(scene);
-const room = buildClassroom(scene);
+let room = buildWorld(scene, 'classroom');
 bakeFigure();
 
 // ---------------------------------------------------------------- state
@@ -57,6 +57,7 @@ const S = {
   traps: new Map(), notes: new Map(),   // notes: stuck under desks AND landed on desks
   items: new Map(),                     // rare cheat items spawned around the room
   standing: false, standingSet: {}, lastOOS: {}, hasMirror: false, hasCushion: false,
+  hasSmoke: false, hasPass: false, smokes: [], passUntil: {},
   attach: {}, myTrapUsed: false, myNoteUsed: false,
   me: { x: 4, z: 6, yaw: Math.PI, walk: 0 }, vx: 0, vz: 0, stun: 0, stuck: 0, keys: {},
   yaw: Math.PI, pitch: 0, locked: false,
@@ -118,6 +119,13 @@ function refreshWho() {
   let role = 'student';
   $('roleStudent').onclick = () => { role = 'student'; $('roleStudent').classList.add('sel'); $('roleTeacher').classList.remove('sel'); };
   $('roleTeacher').onclick = () => { role = 'teacher'; $('roleTeacher').classList.add('sel'); $('roleStudent').classList.remove('sel'); };
+  S.mapSel = 'random';
+  [...$('mapRow').children].forEach(b => (b.onclick = () => {
+    S.mapSel = b.dataset.map;
+    [...$('mapRow').children].forEach(x => x.classList.toggle('sel', x === b));
+    $('mapNote').textContent = S.mapSel === 'random' ? '🎲 random map each round'
+      : `${MAPS[S.mapSel].icon} ${MAPS[S.mapSel].name}${MAPS[S.mapSel].items.includes('smoke') ? ' — exclusive: smoke vial' : MAPS[S.mapSel].items.includes('pass') ? ' — exclusive: hall pass' : ''}`;
+  }));
   $('btnSolo').onclick = () => join('solo', role);
   $('btnCreate').onclick = () => join('create', role);
   $('btnJoin').onclick = () => join('join', role, $('codeInput').value.trim().toUpperCase());
@@ -208,7 +216,9 @@ function hostStart() {
   if (t.length !== 1 || st.length < 1) return;
   const seats = {};
   st.slice(0, 9).forEach((p, i) => (seats[p.id] = i));
-  S.net.send('start', { seed: +(P.get('seed') || (Math.random() * 1e9 | 0)), seats, teacherId: t[0].id });
+  const ids = Object.keys(MAPS);
+  const map = P.get('map') || (S.mapSel === 'random' || !MAPS[S.mapSel] ? ids[(Math.random() * ids.length) | 0] : S.mapSel);
+  S.net.send('start', { seed: +(P.get('seed') || (Math.random() * 1e9 | 0)), seats, teacherId: t[0].id, map });
 }
 function hostPhase(phase) {
   const endsAt = Date.now() + DUR[phase] / TSCALE * 1000;
@@ -223,11 +233,13 @@ function hostPhase(phase) {
     S.nextDutyAt = now() + (14 + Math.random() * 10) / TSCALE;
     for (const tr of S.traps.values())
       if (tr.kind === 'clock' && tr.armed) tr.ringAt = now() + (0.25 + Math.random() * 0.5) * DUR.exam / TSCALE;
-    // rare cheat items appear around the room — you must LEAVE YOUR SEAT to grab
-    // one (map-specific pools later; the classroom gets all three)
-    const spots = [[-6.4, -5.3], [6.4, -2.2], [-6.4, 3.1], [6.4, 5.4], [0, 7.0], [-2.2, -4.8], [3.2, -5.1]]
+    // rare cheat items appear around the room — you must LEAVE YOUR SEAT to
+    // grab one. Each map has its own pool (lab: smoke vial, gym: hall pass)
+    const rx = ROOM.x - 2.0, rz = ROOM.z - 1.2;
+    const spots = [[-rx, -rz + 2], [rx, -2.2], [-rx, 3.1], [rx, rz - 1], [0, rz],
+      [TEACHER_DESK.x, TEACHER_DESK.z + 1.7], [3.2, -rz + 2.4]]
       .sort(() => Math.random() - 0.5);
-    ['mirror', 'scrap', 'cushion'].sort(() => Math.random() - 0.5).forEach((kind, i) =>
+    [...MAPS[room.mapId].items].sort(() => Math.random() - 0.5).forEach((kind, i) =>
       S.net.send('itemSpawn', { id: 'it-' + makeId().slice(0, 5), kind, pos: [spots[i][0], 0, spots[i][1]] }));
   }
 }
@@ -246,6 +258,7 @@ function hostTick(dt) {
   // window so the teacher can accuse a wanderer at ANY moment, not just 5s
   for (const p of students()) {
     if (S.expelled[p.id] || S.seats[p.id] == null) continue;
+    if (S.passUntil[p.id] > t) continue;   // hall pass: wandering is legal
     if (S.standingSet[p.id] && t > (S.lastOOS[p.id] || 0) + 1.4) { S.lastOOS[p.id] = t; logCheat(p.id, 'OUT OF THEIR SEAT'); }
   }
   if (!S.duty && t >= S.nextDutyAt) {
@@ -306,8 +319,18 @@ function hostResults(reason) {
   if (rows[0] && !rows[0].expelled) rows[0].crown = true;
   S.net.send('results', { rows, avg, pass, reason });
 }
+function inSmoke(pid) {
+  if (!S.smokes.length) return false;
+  const t = now();
+  const pose = S.standingSet[pid] && S.poses[pid];
+  const seat = S.seats[pid];
+  const px = pose ? pose.x : seat != null ? DESKS[seat].x : null;
+  const pz = pose ? pose.z : seat != null ? DESKS[seat].z : null;
+  if (px == null) return false;
+  return S.smokes.some(s => s.until > t && Math.hypot(s.x - px, s.z - pz) < 2.8);
+}
 function logCheat(pid, kind, img) {
-  if (ringing()) return;
+  if (ringing() || inSmoke(pid)) return;   // cover noise / cover smoke
   S.cheatLog.push({ pid, kind, img, until: now() + CATCH_WINDOW, riot: inRiot() });
   if (S.cheatLog.length > 300) S.cheatLog.splice(0, 150);
 }
@@ -398,11 +421,30 @@ function onEvent(ev) {
         } else if (it.kind === 'mirror') {
           S.hasMirror = true;
           toast('🪞 mirror! peek at ANYONE\'s paper from your seat', 'gold');
+        } else if (it.kind === 'smoke') {
+          S.hasSmoke = true;
+          toast('🌫 smoke vial! aim at the floor to smash it — cheats inside the cloud are invisible', 'gold');
+        } else if (it.kind === 'pass') {
+          S.hasPass = true;
+          toast('🎫 hall pass! your next stroll out of your seat is LEGAL for 12s', 'gold');
         } else {
           S.hasCushion = true;
           toast('💨 whoopee cushion! aim at the floor to hide it', 'gold');
         }
       } else if (!isTeacher()) toast(`${ITEM_ICON[it.kind]} ${nameOf(data.by)} grabbed the ${it.kind}`);
+      break;
+    }
+    case 'smoke': {
+      sfx.crash(volAt(data.x, data.z) * 0.7);
+      S.smokes.push({ x: data.x, z: data.z, until: now() + 6, born: now(), mesh: smokePuff(data.x, data.z) });
+      gesture(from, '🌫 SMOKE!');
+      if (isTeacher()) banner('🌫 SMOKE?! WHO BROUGHT SMOKE TO AN EXAM?!', 2600);
+      break;
+    }
+    case 'usePass': {
+      S.passUntil[from] = now() + 12;
+      gesture(from, '🎫 hall pass!', 'rgba(160,130,20,0.85)');
+      if (from === S.myId) toast('🎫 hall pass active — 12 seconds of legal wandering', 'gold');
       break;
     }
     case 'accuse': if (S.net.isHost()) hostAccuse(from, data.target); break;
@@ -546,6 +588,7 @@ function handleVerdict(v) {
 // ---------------------------------------------------------------- round lifecycle
 function startRound(data) {
   S.seed = data.seed; S.seats = data.seats; S.teacherId = data.teacherId;
+  if (room.mapId !== (data.map || 'classroom')) room = buildWorld(scene, data.map || 'classroom');
   S.exam = generateExam(data.seed);
   S.answers = {}; S.strikes = {}; S.expelled = {}; S.knowledge = {};
   S.authority = 100; S.inspection = 100; S.duty = null; S.riotUntil = 0;
@@ -555,6 +598,7 @@ function startRound(data) {
   S.hotSel = -1; S.armedThrow = null; S.sheetOpen = true;
   S.standing = false; S.standingSet = {}; S.lastOOS = {};
   S.hasMirror = false; S.hasCushion = false; S.vx = 0; S.vz = 0;
+  S.hasSmoke = false; S.hasPass = false; S.passUntil = {};
   for (const pid in S.seats) S.answers[pid] = Array(N_QUESTIONS).fill(null);
   clearRound(false);
   bots.reset();
@@ -586,7 +630,8 @@ function clearRound(alsoUI = true) {
   for (const tr of S.traps.values()) scene.remove(tr.mesh);
   for (const n of S.notes.values()) scene.remove(n.mesh);
   for (const it of S.items.values()) scene.remove(it.mesh);
-  S.traps.clear(); S.notes.clear(); S.items.clear();
+  for (const s of S.smokes) scene.remove(s.mesh);
+  S.traps.clear(); S.notes.clear(); S.items.clear(); S.smokes.length = 0;
   clearBottleLabels();
   sfx.stopRing();
   if (alsoUI) ['sheet', 'teachBar', 'hotbar', 'crosshair', 'prompt', 'helpTip'].forEach(i => show(i, false));
@@ -606,13 +651,13 @@ function setPhase(phase, endsAt) {
     // the paper starts in your hands — free the mouse so answers are clickable
     if (stud && S.sheetOpen && mySeat() != null) document.exitPointerLock && document.exitPointerLock();
   }
-  if (phase === 'prep') banner(stud ? '🛠 RIG THE ROOM — the teacher isn\'t here yet' : '👀 the class is up to something…', 3000);
+  if (phase === 'prep') banner(`${MAPS[room.mapId].icon} ${MAPS[room.mapId].name} — ` + (stud ? '🛠 RIG THE ROOM before the teacher arrives!' : '👀 the class is up to something…'), 3200);
   refreshHotbar();
 }
 
 // ---------------------------------------------------------------- world objects
 const TRAP_ICON = { marbles: '🔮', glue: '🍯', pepper: '🌶', clock: '⏰', cushion: '💨' };
-const ITEM_ICON = { mirror: '🪞', scrap: '📜', cushion: '💨' };
+const ITEM_ICON = { mirror: '🪞', scrap: '📜', cushion: '💨', smoke: '🌫', pass: '🎫' };
 function trapMesh(kind, pos) {
   const g = new THREE.Group();
   const m = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, ...o });
@@ -653,6 +698,15 @@ function itemMesh(kind, pos) {
   } else if (kind === 'scrap') {
     const p = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.16), m('#f2e8b8', { side: THREE.DoubleSide, roughness: 0.95 }));
     p.rotation.x = -0.9; p.position.y = 0.28; g.add(p);
+  } else if (kind === 'smoke') {
+    const v = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.16, 10),
+      m('#b8c8d0', { roughness: 0.15, transparent: true, opacity: 0.8 }));
+    v.position.y = 0.3; g.add(v);
+    const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.05, 8), m('#8a6a42'));
+    cork.position.y = 0.4; g.add(cork);
+  } else if (kind === 'pass') {
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.14), m('#e8c84e', { side: THREE.DoubleSide, roughness: 0.6 }));
+    card.rotation.x = -0.7; card.position.y = 0.3; g.add(card);
   } else {
     const b = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.06, 16), m('#d86a9a', { roughness: 0.7 }));
     b.position.y = 0.28; g.add(b);
@@ -693,6 +747,20 @@ function flyNote(fromId, toId, onLand) {
     new THREE.MeshStandardMaterial({ color: '#fdf7e3' }));
   scene.add(m);
   flights.push({ m, t: 0, a: a.group.position.clone().setY(1.35), b: new THREE.Vector3(d.x, 1.12, d.deskZ), onLand });
+}
+// a billowing cloud: cheats inside it never reach the teacher's cheat log
+function smokePuff(x, z) {
+  const g = new THREE.Group();
+  for (let i = 0; i < 6; i++) {
+    const s = new THREE.Mesh(new THREE.SphereGeometry(0.55 + Math.random() * 0.5, 12, 10),
+      new THREE.MeshStandardMaterial({ color: '#c8ccd4', roughness: 1, transparent: true, opacity: 0.55, depthWrite: false }));
+    s.position.set((Math.random() - 0.5) * 1.6, 0.5 + Math.random() * 1.1, (Math.random() - 0.5) * 1.6);
+    g.add(s);
+  }
+  g.position.set(x, 0, z);
+  g.scale.setScalar(0.3);
+  scene.add(g);
+  return g;
 }
 const bottleLabels = [];
 function bottleLabel(seat) {
@@ -872,8 +940,9 @@ function toggleSeat() {
     S.standing = true;
     S.me.x = d.x; S.me.z = d.z + 1.0; S.vx = 0; S.vz = 0;
     act('stand');
+    if (S.hasPass) { S.hasPass = false; S.net.send('usePass', {}); }
+    else toast('🪑 you are OUT OF YOUR SEAT — the teacher can accuse you on sight!', 'red');
     show('sheet', false);
-    toast('🪑 you are OUT OF YOUR SEAT — the teacher can accuse you on sight!', 'red');
   } else if (Math.hypot(S.me.x - d.x, S.me.z - (d.z + 0.15)) < 1.5) {
     S.standing = false;
     S.me.x = d.x; S.me.z = d.z + 0.15; S.me.walk = 0; S.vx = 0; S.vz = 0;
@@ -996,15 +1065,19 @@ function computePrompt() {
           break;
         }
       }
-      // carrying the whoopee cushion → hide it on the floor
-      if (!S.prompt && S.hasCushion) {
+      // carrying a deployable (cushion / smoke vial) → use it on the floor
+      if (!S.prompt && (S.hasCushion || S.hasSmoke)) {
         const hit = new THREE.Vector3();
         if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit) &&
             Math.abs(hit.x) < ROOM.x && Math.abs(hit.z) < ROOM.z &&
             hit.distanceTo(new THREE.Vector3(S.me.x, 0, S.me.z)) < 3) {
-          set('💨 CLICK — hide the whoopee cushion here', () => {
+          if (S.hasCushion) set('💨 CLICK — hide the whoopee cushion here', () => {
             S.net.send('trap', { id: 'tr-' + makeId().slice(0, 5), kind: 'cushion', pos: [hit.x, 0, hit.z] });
             S.hasCushion = false;
+          });
+          else set('🌫 CLICK — smash the smoke vial here', () => {
+            S.net.send('smoke', { x: hit.x, z: hit.z });
+            S.hasSmoke = false;
           });
         }
       }
@@ -1145,6 +1218,16 @@ function frame(nowMs) {
     for (const ch of it.mesh.children)
       if (!ch.userData.halo) ch.position.y = ch.userData.baseY + Math.sin(t * 2.4 + it.mesh.position.x) * 0.045;
   }
+  // smoke clouds billow up, drift, then thin out and vanish
+  for (let i = S.smokes.length - 1; i >= 0; i--) {
+    const s = S.smokes[i];
+    const age = t - s.born, left = s.until - t;
+    if (left <= -0.5) { scene.remove(s.mesh); S.smokes.splice(i, 1); continue; }
+    s.mesh.scale.setScalar(Math.min(1, 0.3 + age * 1.1));
+    s.mesh.rotation.y += dt * 0.35;
+    const op = Math.max(0, Math.min(0.55, left * 0.7));
+    for (const ch of s.mesh.children) ch.material.opacity = op;
+  }
 
   // tension chips: "out of seat" reminder + teacher-proximity warning
   const inDanger = !isTeacher() && S.phase === 'exam' && !S.expelled[S.myId] && mySeat() != null;
@@ -1190,7 +1273,8 @@ window.__game = {
       answers: S.answers[S.myId], strikes: { ...S.strikes }, expelled: { ...S.expelled },
       authority: S.authority, inspection: S.inspection, traps: S.traps.size, notes: S.notes.size,
       prompt: S.prompt && S.prompt.text, isHost: S.net ? S.net.isHost() : false, country: S.exam && S.exam.country,
-      standing: S.standing, items: S.items.size, hasMirror: S.hasMirror, hasCushion: S.hasCushion };
+      standing: S.standing, items: S.items.size, hasMirror: S.hasMirror, hasCushion: S.hasCushion,
+      hasSmoke: S.hasSmoke, hasPass: S.hasPass, smokes: S.smokes.length, map: room.mapId };
   },
   skipPhase() { if (S.net && S.net.isHost()) S.phaseEnds = 0; },
   look(yaw, pitch) { S.yaw = yaw; S.pitch = pitch || 0; },
