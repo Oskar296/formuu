@@ -29,7 +29,7 @@ renderer.toneMappingExposure = 1.05;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#cfd8e4');
 scene.fog = new THREE.Fog('#cfd8e4', 24, 46);
-const camera = new THREE.PerspectiveCamera(72, 1, 0.05, 90);
+const camera = new THREE.PerspectiveCamera(profile.fov, 1, 0.05, 90);
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 lights(scene);
@@ -73,9 +73,16 @@ function toast(msg, cls = '') {
 }
 let bannerT = 0;
 function banner(msg, ms = 2600) { const b = $('banner'); b.textContent = msg; b.style.opacity = 1; clearTimeout(bannerT); bannerT = setTimeout(() => (b.style.opacity = 0), ms); }
-function viewer(title, img) { $('viewerTitle').textContent = title; $('viewerImg').src = img; $('viewer').classList.remove('hidden'); }
+function viewer(title, img) {
+  // free the mouse so the pop-up can actually be closed while pointer-locked
+  document.exitPointerLock && document.exitPointerLock();
+  $('viewerTitle').textContent = title; $('viewerImg').src = img; $('viewer').classList.remove('hidden');
+}
 $('viewerClose').onclick = () => $('viewer').classList.add('hidden');
+$('viewer').addEventListener('pointerup', e => { if (e.target.id === 'viewer') $('viewer').classList.add('hidden'); });
+$('help').addEventListener('pointerup', e => { if (e.target.id === 'help') $('help').classList.add('hidden'); });
 const show = (id, v) => $(id).classList.toggle('hidden', !v);
+const modalOpen = () => ['viewer', 'scrib', 'help', 'settings'].some(id => !$(id).classList.contains('hidden'));
 
 function sheetImage(name, answers) {
   const cv = document.createElement('canvas'); cv.width = 340; cv.height = 300;
@@ -111,8 +118,14 @@ function refreshWho() {
     : 'Local mode: rooms work across TABS of this browser. Solo works everywhere.';
   $('soundBtn').onclick = () => ($('soundBtn').textContent = sfx.toggle() ? '🔇' : '🔊');
   // settings: username + color
+  $('setFov').oninput = () => {
+    profile.fov = +$('setFov').value;
+    $('fovVal').textContent = profile.fov;
+    camera.fov = profile.fov; camera.updateProjectionMatrix();
+  };
   $('btnSettings').onclick = () => {
     $('setName').value = profile.name;
+    $('setFov').value = profile.fov; $('fovVal').textContent = profile.fov;
     const g = $('colorGrid'); g.innerHTML = '';
     for (const c of COLORS) {
       const d = document.createElement('div');
@@ -563,7 +576,11 @@ function setPhase(phase, endsAt) {
   show('crosshair', true); show('helpTip', true);
   $('phaseLabel').textContent = phase === 'prep' ? 'PREP — RIG THE ROOM' : phase === 'inspect' ? 'INSPECTION' : phase === 'exam' ? 'THE EXAM — DO NOT GET CAUGHT' : phase.toUpperCase();
   if (phase === 'inspect' || phase === 'exam') sfx.bell();
-  if (phase === 'exam') banner(S.exam ? `📝 Subject: the Republic of ${S.exam.country}` : '📝 BEGIN!', 3000);
+  if (phase === 'exam') {
+    banner(S.exam ? `📝 Subject: the Republic of ${S.exam.country}` : '📝 BEGIN!', 3000);
+    // the paper starts in your hands — free the mouse so answers are clickable
+    if (stud && S.sheetOpen && mySeat() != null) document.exitPointerLock && document.exitPointerLock();
+  }
   if (phase === 'prep') banner(stud ? '🛠 RIG THE ROOM — the teacher isn\'t here yet' : '👀 the class is up to something…', 3000);
   refreshHotbar();
 }
@@ -703,6 +720,17 @@ function refreshSheet() {
     [...d.querySelector('.opts').children].forEach((b, oi) => b.classList.toggle('pick', mine[qi] === oi));
   });
 }
+// picking the paper up frees the mouse (to click answers); putting it down
+// grabs the mouse again — same rhythm as Minecraft's inventory
+function setSheet(open) {
+  S.sheetOpen = open;
+  show('sheet', open && S.phase === 'exam' && !isTeacher() && mySeat() != null);
+  if (open) document.exitPointerLock && document.exitPointerLock();
+  else if (!modalOpen()) {
+    const p = canvas.requestPointerLock && canvas.requestPointerLock();
+    if (p && p.catch) p.catch(() => {});
+  }
+}
 let answersDirty = 0;
 function setAnswer(q, a, sync = true) {
   if (S.expelled[S.myId]) return;
@@ -771,8 +799,21 @@ addEventListener('pointerup', () => (dragXY = null));
 
 addEventListener('keydown', e => {
   S.keys[e.code] = true;
-  if (e.code === 'Tab') { e.preventDefault(); if (S.phase === 'exam' && !isTeacher()) { S.sheetOpen = !S.sheetOpen; show('sheet', S.sheetOpen && mySeat() != null); } }
-  if (e.code === 'KeyH') $('help').classList.toggle('hidden');
+  // pop-ups swallow game keys — E / ESC / Enter / Space close them
+  if (!$('viewer').classList.contains('hidden')) {
+    if (['Escape', 'KeyE', 'Enter', 'Space'].includes(e.code)) { e.preventDefault(); $('viewer').classList.add('hidden'); }
+    return;
+  }
+  if (!$('scrib').classList.contains('hidden')) {
+    if (e.code === 'Escape') { show('scrib', false); scribCb = null; }
+    return;
+  }
+  if (!$('help').classList.contains('hidden')) {
+    if (e.code === 'KeyH' || e.code === 'Escape') $('help').classList.add('hidden');
+    return;
+  }
+  if (e.code === 'Tab') { e.preventDefault(); if (S.phase === 'exam' && !isTeacher() && mySeat() != null) setSheet(!S.sheetOpen); }
+  if (e.code === 'KeyH') $('help').classList.remove('hidden');
   const k = e.key;
   if (S.phase === 'prep' && !isTeacher() && '12345'.includes(k)) selectHot(+k - 1);
   if (S.phase === 'exam' && !isTeacher() && !S.expelled[S.myId] && mySeat() != null) {
@@ -791,8 +832,8 @@ addEventListener('keyup', e => (S.keys[e.code] = false));
 addEventListener('pointerup', e => {
   // clicks act on the crosshair target when locked; when unlocked a plain
   // click (no drag) does the same via the cursor ray
-  if (e.target !== canvas) return;
-  if (S.prompt && (S.locked || true)) S.prompt.run();
+  if (e.target !== canvas || modalOpen()) return;
+  if (S.prompt) S.prompt.run();
 });
 function act(type, extra = {}) {
   if (isTeacher() || S.phase !== 'exam' || S.expelled[S.myId]) return;
@@ -918,7 +959,7 @@ function computePrompt() {
             }
           } else if (deskIdx === seat && !S.standing && dist < 3.4) {
             set('📄 CLICK — ' + (S.sheetOpen ? 'put your paper down (TAB)' : 'pick up your paper (TAB)'),
-              () => { S.sheetOpen = !S.sheetOpen; show('sheet', S.sheetOpen); });
+              () => setSheet(!S.sheetOpen));
           }
         }
       }
