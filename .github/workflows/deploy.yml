@@ -40,6 +40,21 @@ jobs:
           # Must match the repo name so assets resolve under /<repo>/
           NEXT_PUBLIC_BASE_PATH: /formuu
 
+      # The game at public/game/ is copied verbatim (Next's env inlining never
+      # touches it), so inject the Supabase config into its env.js here. When
+      # the secrets are unset the stub stays and the game runs in local mode.
+      # (The check lives in the shell: the `secrets` context is not allowed
+      # in a step-level `if`, and using it there breaks workflow parsing.)
+      - name: Enable game online rooms
+        run: |
+          if [ -n "$SB_URL" ]; then
+            printf "export const SUPABASE_URL = '%s';\nexport const SUPABASE_ANON_KEY = '%s';\n" \
+              "$SB_URL" "$SB_KEY" > out/game/env.js
+          fi
+        env:
+          SB_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SB_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
       - name: Disable Jekyll processing
         run: touch out/.nojekyll
 

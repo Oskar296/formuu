@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>THE EXAM — cheat together, don't get caught</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📝</text></svg>">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #14161f; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; color: #f0ede4; user-select: none; -webkit-user-select: none; }
+  #c { position: fixed; inset: 0; display: block; }
+  button { font-family: inherit; cursor: pointer; }
+  .hidden { display: none !important; }
+  .dim { opacity: .55; }
+
+  /* ---------- overlays ---------- */
+  .ov { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; background: rgba(12,14,22,.78); backdrop-filter: blur(5px); text-align: center; padding: 18px; }
+  #menu { background: linear-gradient(100deg, rgba(12,14,22,.1) 40%, rgba(12,14,22,.85) 62%);
+    backdrop-filter: none; flex-direction: row; justify-content: flex-end; }
+  #menuRight { display: flex; flex-direction: column; align-items: center; margin-right: 4vw; }
+  h1.logo { font-size: clamp(34px, 6vw, 58px); font-weight: 900; letter-spacing: 3px;
+    text-shadow: 0 3px 0 #8a2f2f, 0 7px 24px rgba(0,0,0,.6); }
+  .tag { letter-spacing: 4px; font-size: 12.5px; opacity: .65; margin-top: 6px; }
+  .card { margin-top: 22px; background: #232837ee; border: 1px solid #3a4156; border-radius: 16px;
+    padding: 20px 24px; width: min(420px, 92vw); }
+  #whoRow { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 14px; }
+  #whoDot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff3; }
+  #whoName { font-size: 17px; font-weight: 700; }
+  #btnSettings { background: none; border: 1px solid #4a5270; border-radius: 9px; color: #cfd3e0;
+    padding: 6px 11px; font-size: 14px; }
+  .roleRow { display: flex; gap: 10px; margin-bottom: 12px; }
+  .roleRow button { flex: 1; padding: 11px; border-radius: 10px; border: 1px solid #4a5270;
+    background: #171b26; color: #cfd3e0; font-size: 14.5px; }
+  .roleRow button.sel { background: #3a4a7a; border-color: #7a8ac9; color: #fff; }
+  .bigBtn { width: 100%; padding: 13px; font-size: 16px; font-weight: 800; letter-spacing: 1px;
+    border: none; border-radius: 10px; background: linear-gradient(120deg, #e0b64e, #d68a3f); color: #241a08; }
+  .bigBtn.green { background: linear-gradient(120deg, #8fd39e, #5aa86b); color: #12210f; margin-bottom: 10px; }
+  .bigBtn:disabled { filter: grayscale(.8); opacity: .5; cursor: default; }
+  .row2 { display: flex; gap: 10px; margin-top: 10px; }
+  .row2 input { flex: 1; padding: 11px; border-radius: 10px; border: 1px solid #4a5270; background: #171b26;
+    color: #f0ede4; font-size: 15px; text-align: center; text-transform: uppercase; }
+  .row2 button { padding: 0 20px; border-radius: 10px; border: 1px solid #4a5270; background: #2c3247; color: #f0ede4; font-weight: 700; }
+  .note { font-size: 11.5px; opacity: .55; margin-top: 12px; line-height: 1.5; }
+
+  /* settings */
+  #settings .card { width: min(400px, 92vw); }
+  #setName { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #4a5270; background: #171b26;
+    color: #f0ede4; font-size: 16px; text-align: center; margin-bottom: 16px; }
+  #colorGrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 16px; }
+  .swatch { aspect-ratio: 1; border-radius: 50%; border: 3px solid transparent; cursor: pointer; transition: .12s; }
+  .swatch:hover { transform: scale(1.12); }
+  .swatch.sel { border-color: #fff; box-shadow: 0 0 12px rgba(255,255,255,.5); }
+  .setLbl { font-size: 11px; letter-spacing: 2px; opacity: .6; text-align: left; margin-bottom: 8px; }
+
+  /* lobby */
+  #roomCodeBig { font-size: 46px; font-weight: 900; letter-spacing: 12px; color: #e0b64e; margin: 6px 0; }
+  #roster { margin: 14px 0; display: flex; flex-direction: column; gap: 6px; width: 100%; }
+  #roster > div { background: #171b26; border-radius: 8px; padding: 8px 12px; font-size: 14.5px;
+    display: flex; justify-content: space-between; align-items: center; }
+  .rosterDot { display: inline-block; width: 13px; height: 13px; border-radius: 50%; margin-right: 8px; }
+  #lobbyHint { font-size: 12.5px; opacity: .65; margin-top: 4px; }
+
+  /* results */
+  #resultsRows { margin: 14px 0; display: flex; flex-direction: column; gap: 5px; width: min(420px, 90vw); }
+  #resultsRows div { display: flex; justify-content: space-between; background: #171b26; border-radius: 8px;
+    padding: 8px 14px; font-size: 15px; }
+  #resultsRows .val { color: #e0b64e; font-weight: 800; }
+  #avgLine { font-size: 18px; margin-top: 4px; }
+
+  /* ---------- in-round HUD (minimal) ---------- */
+  .hud { position: fixed; z-index: 20; pointer-events: none; }
+  #topbar { top: 12px; left: 50%; transform: translateX(-50%); text-align: center;
+    background: rgba(14,16,24,.62); border-radius: 12px; padding: 5px 20px; backdrop-filter: blur(4px); }
+  #phaseLabel { font-size: 9.5px; letter-spacing: 3px; opacity: .65; }
+  #phaseTimer { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+  #crosshair { top: 50%; left: 50%; transform: translate(-50%, -50%); width: 5px; height: 5px;
+    border-radius: 50%; background: rgba(255,255,255,.9); box-shadow: 0 0 5px rgba(0,0,0,.8); }
+  #prompt { top: 55%; left: 50%; transform: translateX(-50%); font-size: 14.5px; font-weight: 700;
+    background: rgba(14,16,24,.75); padding: 7px 16px; border-radius: 999px; border: 1px solid #3a4156;
+    white-space: nowrap; }
+  #prompt b { color: #ffd76a; }
+
+  #banner { top: 18%; left: 50%; transform: translateX(-50%); font-size: clamp(20px, 3.4vw, 32px); font-weight: 900;
+    letter-spacing: 2px; color: #ffd76a; text-shadow: 0 3px 16px rgba(0,0,0,.85); opacity: 0; transition: opacity .3s;
+    text-align: center; max-width: 92vw; }
+  #toasts { bottom: 84px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column-reverse;
+    gap: 6px; align-items: center; }
+  .toast { background: rgba(18,21,32,.92); border: 1px solid #3a4156; border-radius: 10px; padding: 7px 15px;
+    font-size: 13.5px; animation: tIn .25s ease-out; max-width: 80vw; }
+  .toast.gold { border-color: #e0b64e; color: #ffd76a; }
+  .toast.red { border-color: #c05050; color: #ff9a9a; }
+  @keyframes tIn { from { opacity: 0; transform: translateY(10px); } }
+
+  /* Minecraft-style hotbar (prep) */
+  #hotbar { bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: auto; }
+  .slot { width: 58px; height: 58px; background: rgba(17,20,30,.85); border: 2px solid #3a4156; border-radius: 10px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 20px;
+    position: relative; cursor: pointer; }
+  .slot.sel { border-color: #ffd76a; box-shadow: 0 0 10px rgba(224,182,78,.4); }
+  .slot.used { opacity: .3; }
+  .slot .k { position: absolute; top: 2px; left: 5px; font-size: 9.5px; opacity: .6; }
+  .slot .nm { font-size: 8.2px; letter-spacing: .3px; opacity: .75; margin-top: 1px; }
+
+  /* exam sheet (TAB to toggle) */
+  #sheet { top: 60px; right: 12px; width: 292px; max-height: calc(100vh - 130px); overflow-y: auto;
+    background: repeating-linear-gradient(#f6f1e0, #f6f1e0 26px, #e9e2cc 27px); color: #2a2418;
+    border-radius: 4px 10px 10px 4px; padding: 12px 12px 12px 22px; pointer-events: auto;
+    box-shadow: 0 10px 34px rgba(0,0,0,.55); font-size: 13px;
+    border-left: 3px solid rgba(190,90,90,.5); }
+  #sheet h3 { font-size: 12.5px; letter-spacing: .5px; margin-bottom: 2px; color: #6a1f1f; font-family: Georgia, serif; }
+  #sheet .hint { font-size: 10px; opacity: .55; margin-bottom: 7px; }
+  .q { padding: 5px 4px; border-radius: 6px; margin-bottom: 2px; }
+  .q .qt { font-weight: 600; line-height: 1.3; }
+  .q.studied .qt::after { content: ' 📖'; }
+  .q .opts { display: flex; gap: 5px; margin-top: 4px; }
+  .q .opts button { flex: 1; padding: 3px 0; border-radius: 6px; border: 1px solid #b9ac8a;
+    background: rgba(250,246,234,.7); font-size: 12px; font-weight: 700; color: #4a3f28; }
+  .q .opts button.pick { background: #33508c; border-color: #33508c; color: #fff; }
+
+  /* teacher meters */
+  #teachBar { top: 60px; left: 12px; width: 168px; background: rgba(14,16,24,.66); border-radius: 12px;
+    padding: 11px; font-size: 12px; backdrop-filter: blur(4px); }
+  #teachBar .lbl { font-size: 9px; letter-spacing: 2px; opacity: .6; margin-bottom: 3px; }
+  .meter { height: 8px; border-radius: 5px; background: #2a2f40; overflow: hidden; margin-bottom: 8px; }
+  .meter i { display: block; height: 100%; border-radius: 5px; transition: width .3s; }
+  #authFill i { background: linear-gradient(90deg, #e0b64e, #d68a3f); }
+  #inspFill i { background: linear-gradient(90deg, #6aa8e0, #4e86c7); }
+  #dutyLine { color: #ffd76a; font-weight: 700; min-height: 15px; }
+
+  /* help */
+  #helpTip { bottom: 12px; right: 12px; font-size: 11.5px; opacity: .55;
+    background: rgba(14,16,24,.55); padding: 5px 12px; border-radius: 999px; }
+  #help { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+    background: rgba(10,12,18,.75); }
+  #helpCard { background: #232837; border: 1px solid #3a4156; border-radius: 16px; padding: 22px 28px;
+    font-size: 14px; line-height: 2; text-align: left; }
+  #helpCard b { color: #ffd76a; display: inline-block; min-width: 78px; }
+
+  /* scribbler + viewer */
+  #scrib { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+    background: rgba(10,12,18,.72); }
+  #scribCard { background: #232837; border: 1px solid #3a4156; border-radius: 16px; padding: 16px; text-align: center; }
+  #scribCanvas { background: #f6f1e0; border-radius: 8px; cursor: crosshair; touch-action: none; }
+  #scribRow { display: flex; gap: 8px; margin-top: 10px; justify-content: center; }
+  #scribRow button { padding: 9px 16px; border-radius: 9px; border: 1px solid #4a5270; background: #2c3247;
+    color: #f0ede4; font-weight: 700; font-size: 13.5px; }
+  #scribRow button.gold { background: linear-gradient(120deg, #e0b64e, #d68a3f); color: #241a08; border: none; }
+  #viewer { position: fixed; inset: 0; z-index: 55; display: flex; align-items: center; justify-content: center;
+    background: rgba(10,12,18,.7); }
+  #viewerCard { background: #232837; border: 1px solid #3a4156; border-radius: 16px; padding: 16px; text-align: center;
+    max-width: 92vw; }
+  #viewerTitle { font-size: 14.5px; margin-bottom: 10px; max-width: 460px; line-height: 1.4; }
+  #viewerImg { background: #f6f1e0; border-radius: 8px; max-width: min(440px, 88vw); }
+  #viewerClose { margin-top: 12px; padding: 9px 26px; border-radius: 9px; border: none;
+    background: linear-gradient(120deg, #e0b64e, #d68a3f); color: #241a08; font-weight: 800; }
+
+  #soundBtn { position: fixed; top: 12px; right: 12px; z-index: 45; background: rgba(23,27,38,.9);
+    border: 1px solid #3a4156; border-radius: 10px; padding: 6px 10px; font-size: 15px; color: #fff; }
+  #riotVignette { position: fixed; inset: 0; z-index: 15; pointer-events: none; opacity: 0; transition: opacity .4s;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(255,60,30,.4) 100%); }
+  #tnear { top: calc(50% + 52px); left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 800;
+    letter-spacing: 1px; color: #ff9a9a; background: rgba(40,12,12,.7); border: 1px solid #c05050;
+    padding: 4px 13px; border-radius: 999px; opacity: 0; transition: opacity .35s; }
+  #oos { top: calc(50% - 64px); left: 50%; transform: translateX(-50%); font-size: 11.5px; font-weight: 800;
+    letter-spacing: 2px; color: #ffd76a; background: rgba(40,30,10,.7); border: 1px solid #e0b64e;
+    padding: 4px 13px; border-radius: 999px; opacity: 0; transition: opacity .35s; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="riotVignette"></div>
+
+<!-- MENU -->
+<div class="ov" id="menu">
+  <div id="menuRight">
+    <h1 class="logo">📝 THE EXAM</h1>
+    <div class="tag">CHEAT TOGETHER · DON'T GET CAUGHT</div>
+    <div class="card">
+      <div id="whoRow">
+        <span id="whoDot"></span><span id="whoName">…</span>
+        <button id="btnSettings">⚙️ settings</button>
+      </div>
+      <div class="roleRow">
+        <button id="roleStudent" class="sel">🙋 Student</button>
+        <button id="roleTeacher">🧑‍🏫 Teacher</button>
+      </div>
+      <button class="bigBtn green" id="btnSolo">🤖 PLAY SOLO — vs bots</button>
+      <button class="bigBtn" id="btnCreate">CREATE CLASSROOM</button>
+      <div class="row2">
+        <input type="text" id="codeInput" maxlength="4" placeholder="CODE">
+        <button id="btnJoin">JOIN</button>
+      </div>
+      <div class="note" id="netNote"></div>
+    </div>
+  </div>
+</div>
+
+<!-- SETTINGS -->
+<div class="ov hidden" id="settings">
+  <div class="card">
+    <div class="setLbl">USERNAME</div>
+    <input type="text" id="setName" maxlength="14" placeholder="your name">
+    <div class="setLbl">YOUR COLOR</div>
+    <div id="colorGrid"></div>
+    <button class="bigBtn" id="btnSettingsDone">DONE</button>
+  </div>
+</div>
+
+<!-- LOBBY -->
+<div class="ov hidden" id="lobby">
+  <div class="card" style="text-align:center">
+    <div class="dim" style="letter-spacing:3px;font-size:11px">CLASSROOM CODE</div>
+    <div id="roomCodeBig">----</div>
+    <div id="roster"></div>
+    <button class="bigBtn" id="btnStart" disabled>START THE EXAM</button>
+    <div id="lobbyHint"></div>
+  </div>
+</div>
+
+<!-- RESULTS -->
+<div class="ov hidden" id="results">
+  <h1 class="logo" id="resultTitle">—</h1>
+  <div id="avgLine"></div>
+  <div id="resultsRows"></div>
+  <button class="bigBtn" style="width:min(360px,90vw)" id="btnAgain">BACK TO LOBBY</button>
+</div>
+
+<!-- HUD -->
+<div class="hud" id="topbar"><div id="phaseLabel">—</div><div id="phaseTimer">–:––</div></div>
+<div class="hud hidden" id="crosshair"></div>
+<div class="hud hidden" id="prompt"></div>
+<div class="hud" id="banner"></div>
+<div class="hud" id="toasts"></div>
+<div class="hud hidden" id="helpTip">H — controls</div>
+<div class="hud" id="tnear">👁 TEACHER IS CLOSE</div>
+<div class="hud" id="oos">🪑 OUT OF SEAT — SPACE at your desk to sit</div>
+
+<div class="hud hidden" id="sheet">
+  <h3>📝 FINAL EXAM — <span id="sheetCountry"></span></h3>
+  <div class="hint">TAB hides your paper · 📖 = you studied it</div>
+  <div id="sheetQs"></div>
+</div>
+
+<div class="hud hidden" id="teachBar">
+  <div class="lbl">AUTHORITY</div><div class="meter" id="authFill"><i style="width:100%"></i></div>
+  <div class="lbl">INSPECTION</div><div class="meter" id="inspFill"><i style="width:100%"></i></div>
+  <div id="dutyLine"></div>
+</div>
+
+<div class="hud hidden" id="hotbar">
+  <div class="slot" data-i="0"><span class="k">1</span>🔮<span class="nm">marbles</span></div>
+  <div class="slot" data-i="1"><span class="k">2</span>🍯<span class="nm">glue</span></div>
+  <div class="slot" data-i="2"><span class="k">3</span>🌶<span class="nm">pepper</span></div>
+  <div class="slot" data-i="3"><span class="k">4</span>⏰<span class="nm">clock</span></div>
+  <div class="slot" data-i="4"><span class="k">5</span>📝<span class="nm">note</span></div>
+</div>
+
+<!-- HELP -->
+<div id="help" class="hidden">
+  <div id="helpCard">
+    <div style="font-weight:900;font-size:17px;margin-bottom:6px">CONTROLS</div>
+    <div><b>mouse</b> look around (click once to grab)</div>
+    <div><b>WASD</b> walk (prep / teacher / out of seat)</div>
+    <div><b>E / click</b> use what you're looking at</div>
+    <div><b>SPACE</b> leave / retake your seat mid-exam (risky!)</div>
+    <div><b>N</b> draw a note, then click a classmate to throw</div>
+    <div><b>1–4</b> hold up finger signals</div>
+    <div><b>F</b> flash your sheet &nbsp;·&nbsp; <b>T</b> tap &nbsp;·&nbsp; <b>C</b> cough</div>
+    <div><b>V</b> your arm ink &nbsp;·&nbsp; <b>R</b> raise hand</div>
+    <div><b>TAB</b> show/hide your exam paper</div>
+    <div style="opacity:.75;font-size:12.5px">✨ rare items (🪞 📜 💨) appear when the exam starts — walk over and grab them</div>
+    <div style="opacity:.6;font-size:12px;margin-top:6px">press H to close</div>
+  </div>
+</div>
+
+<!-- SCRIBBLER -->
+<div id="scrib" class="hidden">
+  <div id="scribCard">
+    <div style="font-size:14px;margin-bottom:8px" id="scribTitle">✍️ Draw your note — anything goes</div>
+    <canvas id="scribCanvas" width="360" height="240"></canvas>
+    <div id="scribRow">
+      <button id="scribClear">Clear</button>
+      <button id="scribCancel">Cancel</button>
+      <button id="scribOk" class="gold">Done ➜</button>
+    </div>
+  </div>
+</div>
+
+<!-- VIEWER -->
+<div id="viewer" class="hidden">
+  <div id="viewerCard">
+    <div id="viewerTitle"></div>
+    <img id="viewerImg" alt="note">
+    <br><button id="viewerClose">OK</button>
+  </div>
+</div>
+
+<button id="soundBtn">🔊</button>
+
+<script src="./vendor/supabase.umd.js"></script>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
