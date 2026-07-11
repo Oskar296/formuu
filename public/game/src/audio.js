@@ -31,6 +31,9 @@ export const sfx = {
   learn() { tone(520, 0.1, 'triangle', 0.15, 1.3); tone(780, 0.15, 'triangle', 0.12, 1, 0.08); },
   win() { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.3, 'triangle', 0.18, 1, i * 0.13)); },
   lose() { [400, 340, 260].forEach((f, i) => tone(f, 0.4, 'triangle', 0.18, 0.85, i * 0.2)); },
+  scrape() { tone(90, 0.22, 'sawtooth', 0.16, 2.4); tone(140, 0.16, 'sawtooth', 0.1, 1.8, 0.08); },
+  honk() { [220, 180, 150].forEach((f, i) => tone(f, 0.28, 'sawtooth', 0.22, 0.7, i * 0.16)); },
+  pickup() { tone(660, 0.09, 'triangle', 0.14, 1.5); tone(990, 0.12, 'triangle', 0.11, 1, 0.07); },
   startRing(kind) { this.stopRing(); ringTimer = setInterval(() => (kind === 'phone' ? this.phone() : this.clockRing()), 700); },
   stopRing() { if (ringTimer) { clearInterval(ringTimer); ringTimer = 0; } },
 };

@@ -206,11 +206,12 @@ export function makeFigure(scene, { color = '#eef0f2', name = '', tag = null, sc
       B.head.rotation.x = -0.06 * amp;
       mesh.position.y = Math.abs(Math.sin(ph)) * 0.02 * amp;
     },
-    // seated at a desk: thighs forward, shins down, arms resting toward the desk
+    // seated at a desk: butt on the chair seat, thighs sloping under the desk,
+    // shins near vertical so nothing pokes through chair or desktop
     sit() {
       zero();
-      B.legLu.rotation.x = B.legRu.rotation.x = 1.45;
-      B.legLf.rotation.x = B.legRf.rotation.x = -1.35;
+      B.legLu.rotation.x = B.legRu.rotation.x = 0.95;
+      B.legLf.rotation.x = B.legRf.rotation.x = -0.85;
       B.armLu.rotation.x = B.armRu.rotation.x = 0.55;
       B.armLf.rotation.x = B.armRf.rotation.x = 0.35;
       B.spine.rotation.x = -0.04;

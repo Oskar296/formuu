@@ -65,6 +65,7 @@ export class BotBrain {
       return;
     }
     if (S.phase !== 'exam') return;
+    if (b.roam) { this.roamTick(p, b, now, dt); return; }
     // gain answers over time (successful cheating, abstracted), capped
     const ans = S.answers[p.id] || (S.answers[p.id] = Array(N_QUESTIONS).fill(null));
     b.nextGain -= dt;
@@ -96,8 +97,40 @@ export class BotBrain {
         c.fillText(['?', 'B!', '3=C', 'idk', ':)'][Math.random() * 5 | 0], 90, 78);
         this.net.sendAs(p.id, 'throw', { id: 'nt-' + Math.random().toString(36).slice(2, 7), to: target.id, img: cv.toDataURL('image/png') });
       }
-      else if (roll < 0.85) this.net.sendAs(p.id, 'act', { type: 'cough' });
+      else if (roll < 0.82 && target && S.seats[target.id] != null) {
+        // leave the seat and sneak over to a classmate's desk
+        const td = DESKS[S.seats[target.id]];
+        b.wx = d.x; b.wz = d.z + 1.0;
+        b.roam = { st: 'go', tx: td.x + (d.x < td.x ? -0.95 : 0.95), tz: td.z + 0.2, victim: target.id };
+        this.net.sendAs(p.id, 'act', { type: 'stand' });
+      }
+      else if (roll < 0.9) this.net.sendAs(p.id, 'act', { type: 'cough' });
       else this.net.sendAs(p.id, 'act', { type: 'tap' });
+    }
+  }
+
+  // out-of-seat excursion: walk to the victim's desk, peek, hurry back, sit
+  roamTick(p, b, now, dt) {
+    const S = this.S, r = b.roam, seat = S.seats[p.id], d = DESKS[seat];
+    if (S.expelled[p.id]) { b.roam = null; return; }
+    const dx = r.tx - b.wx, dz = r.tz - b.wz, dist = Math.hypot(dx, dz);
+    if (r.st === 'wait') {
+      if (now > r.until) { r.st = 'back'; r.tx = d.x; r.tz = d.z + 0.7; }
+    } else if (dist > 0.14) {
+      const sp = 2.0 * dt;
+      b.wx += dx / dist * Math.min(dist, sp); b.wz += dz / dist * Math.min(dist, sp);
+    } else if (r.st === 'go') {
+      r.st = 'wait'; r.until = now + 1.4 + Math.random();
+      this.net.sendAs(p.id, 'act', { type: 'peek', target: r.victim });
+    } else {
+      b.roam = null;
+      this.net.sendAs(p.id, 'act', { type: 'sit' });
+      this.net.sendAs(p.id, 'pose', { x: d.x, z: d.z + 0.15, yaw: Math.PI, walk: 0 });
+      return;
+    }
+    if (now > b.poseAt) {
+      b.poseAt = now + 0.12;
+      this.net.sendAs(p.id, 'pose', { x: b.wx, z: b.wz, yaw: Math.atan2(dx, dz) + Math.PI, walk: dist > 0.14 ? 1 : 0 });
     }
   }
 
@@ -130,8 +163,9 @@ export class BotBrain {
       for (const q of S.roster) {
         if (q.role !== 'student' || S.expelled[q.id]) continue;
         const seat = S.seats[q.id]; if (seat == null) continue;
-        const d = DESKS[seat];
-        if (Math.hypot(tb.x - d.x, tb.z - d.z) > 3.4) continue;
+        // wanderers are judged where they actually ARE, not at their desk
+        const loc = (S.standingSet[q.id] && (q.id === S.myId ? S.me : S.poses[q.id])) || DESKS[seat];
+        if (Math.hypot(tb.x - loc.x, tb.z - loc.z) > 3.4) continue;
         const hit = S.cheatLog.some(a => a.pid === q.id && a.until >= now && !a.riot);
         if (hit && Math.random() < 0.55) { this.net.sendAs(p.id, 'accuse', { target: q.id }); break; }
       }

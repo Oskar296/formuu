@@ -161,6 +161,12 @@
     border: 1px solid #3a4156; border-radius: 10px; padding: 6px 10px; font-size: 15px; color: #fff; }
   #riotVignette { position: fixed; inset: 0; z-index: 15; pointer-events: none; opacity: 0; transition: opacity .4s;
     background: radial-gradient(ellipse at center, transparent 55%, rgba(255,60,30,.4) 100%); }
+  #tnear { top: calc(50% + 52px); left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 800;
+    letter-spacing: 1px; color: #ff9a9a; background: rgba(40,12,12,.7); border: 1px solid #c05050;
+    padding: 4px 13px; border-radius: 999px; opacity: 0; transition: opacity .35s; }
+  #oos { top: calc(50% - 64px); left: 50%; transform: translateX(-50%); font-size: 11.5px; font-weight: 800;
+    letter-spacing: 2px; color: #ffd76a; background: rgba(40,30,10,.7); border: 1px solid #e0b64e;
+    padding: 4px 13px; border-radius: 999px; opacity: 0; transition: opacity .35s; }
 </style>
 </head>
 <body>
@@ -229,6 +235,8 @@
 <div class="hud" id="banner"></div>
 <div class="hud" id="toasts"></div>
 <div class="hud hidden" id="helpTip">H — controls</div>
+<div class="hud" id="tnear">👁 TEACHER IS CLOSE</div>
+<div class="hud" id="oos">🪑 OUT OF SEAT — SPACE at your desk to sit</div>
 
 <div class="hud hidden" id="sheet">
   <h3>📝 FINAL EXAM — <span id="sheetCountry"></span></h3>
@@ -255,13 +263,15 @@
   <div id="helpCard">
     <div style="font-weight:900;font-size:17px;margin-bottom:6px">CONTROLS</div>
     <div><b>mouse</b> look around (click once to grab)</div>
-    <div><b>WASD</b> walk (prep / teacher)</div>
+    <div><b>WASD</b> walk (prep / teacher / out of seat)</div>
     <div><b>E / click</b> use what you're looking at</div>
+    <div><b>SPACE</b> leave / retake your seat mid-exam (risky!)</div>
     <div><b>N</b> draw a note, then click a classmate to throw</div>
     <div><b>1–4</b> hold up finger signals</div>
     <div><b>F</b> flash your sheet &nbsp;·&nbsp; <b>T</b> tap &nbsp;·&nbsp; <b>C</b> cough</div>
     <div><b>V</b> your arm ink &nbsp;·&nbsp; <b>R</b> raise hand</div>
     <div><b>TAB</b> show/hide your exam paper</div>
+    <div style="opacity:.75;font-size:12.5px">✨ rare items (🪞 📜 💨) appear when the exam starts — walk over and grab them</div>
     <div style="opacity:.6;font-size:12px;margin-top:6px">press H to close</div>
   </div>
 </div>

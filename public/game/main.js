@@ -45,6 +45,8 @@ const S = {
   duty: null, nextDutyAt: 0, riotUntil: 0, lastAccuseAt: -99, ACCUSE_CD,
   cheatLog: [], figures: {}, poses: {}, walkPh: {}, leanUntil: {},
   traps: new Map(), notes: new Map(),   // notes: stuck under desks AND landed on desks
+  items: new Map(),                     // rare cheat items spawned around the room
+  standing: false, standingSet: {}, lastOOS: {}, hasMirror: false, hasCushion: false,
   attach: {}, myTrapUsed: false, myNoteUsed: false,
   me: { x: 4, z: 6, yaw: Math.PI, walk: 0 }, stun: 0, stuck: 0, keys: {},
   yaw: Math.PI, pitch: 0, locked: false,
@@ -198,6 +200,12 @@ function hostPhase(phase) {
     S.nextDutyAt = now() + (14 + Math.random() * 10) / TSCALE;
     for (const tr of S.traps.values())
       if (tr.kind === 'clock' && tr.armed) tr.ringAt = now() + (0.25 + Math.random() * 0.5) * DUR.exam / TSCALE;
+    // rare cheat items appear around the room — you must LEAVE YOUR SEAT to grab
+    // one (map-specific pools later; the classroom gets all three)
+    const spots = [[-6.4, -5.3], [6.4, -2.2], [-6.4, 3.1], [6.4, 5.4], [0, 7.0], [-2.2, -4.8], [3.2, -5.1]]
+      .sort(() => Math.random() - 0.5);
+    ['mirror', 'scrap', 'cushion'].sort(() => Math.random() - 0.5).forEach((kind, i) =>
+      S.net.send('itemSpawn', { id: 'it-' + makeId().slice(0, 5), kind, pos: [spots[i][0], 0, spots[i][1]] }));
   }
 }
 function hostTick(dt) {
@@ -211,6 +219,12 @@ function hostTick(dt) {
   }
   bots.tick(t, dt);
   if (S.phase !== 'exam') return;
+  // being out of your seat is itself a catchable offence — logged on a rolling
+  // window so the teacher can accuse a wanderer at ANY moment, not just 5s
+  for (const p of students()) {
+    if (S.expelled[p.id] || S.seats[p.id] == null) continue;
+    if (S.standingSet[p.id] && t > (S.lastOOS[p.id] || 0) + 1.4) { S.lastOOS[p.id] = t; logCheat(p.id, 'OUT OF THEIR SEAT'); }
+  }
   if (!S.duty && t >= S.nextDutyAt) {
     S.net.send('duty', { kind: Math.random() < 0.5 ? 'phone' : 'board', deadline: Date.now() + 18000 / TSCALE });
     S.nextDutyAt = t + (26 + Math.random() * 14) / TSCALE;
@@ -229,7 +243,7 @@ function hostTick(dt) {
   const tp = S.poses[S.teacherId] || (S.teacherId === S.myId ? S.me : null);
   for (const tr of S.traps.values()) {
     if (!tr.armed) continue;
-    if ((tr.kind === 'marbles' || tr.kind === 'glue' || tr.kind === 'pepper') && tp &&
+    if (tr.kind !== 'clock' && tp &&
       Math.hypot(tp.x - tr.pos[0], tp.z - tr.pos[2]) < 0.8) S.net.send('trapFire', { id: tr.id });
     else if (tr.kind === 'clock' && tr.ringAt && t >= tr.ringAt) S.net.send('trapFire', { id: tr.id });
   }
@@ -332,6 +346,42 @@ function onEvent(ev) {
       gesture(from, data.slot === 'arm' ? '✍️ scribbles on arm' : '🍼 fiddles with bottle');
       break;
     }
+    case 'itemSpawn': {
+      if (S.items.has(data.id)) break;
+      S.items.set(data.id, { ...data, mesh: itemMesh(data.kind, data.pos) });
+      if (!isTeacher() && now() - (S.itemToastAt || 0) > 3) {
+        S.itemToastAt = now();
+        toast('✨ rare cheat items appeared around the room — leave your seat to grab one', 'gold');
+      }
+      break;
+    }
+    case 'itemGet': {   // host adjudicates first-come-first-served
+      if (S.net.isHost() && S.items.has(data.id)) S.net.send('itemTaken', { id: data.id, by: from });
+      break;
+    }
+    case 'itemTaken': {
+      const it = S.items.get(data.id); if (!it) break;
+      scene.remove(it.mesh); S.items.delete(data.id);
+      if (data.by === S.myId) {
+        sfx.pickup();
+        if (it.kind === 'scrap') {   // instantly reveals one answer you don't have
+          const mine = S.answers[S.myId] || [];
+          const missing = S.exam.questions.filter(q => mine[q.id] !== q.correct);
+          if (missing.length) {
+            const q = missing[(Math.random() * missing.length) | 0];
+            setAnswer(q.id, q.correct);
+            toast(`📜 the scrap says: Q${q.id + 1} = ${LETTERS[q.correct]}!`, 'gold');
+          } else toast('📜 the scrap tells you nothing new');
+        } else if (it.kind === 'mirror') {
+          S.hasMirror = true;
+          toast('🪞 mirror! peek at ANYONE\'s paper from your seat', 'gold');
+        } else {
+          S.hasCushion = true;
+          toast('💨 whoopee cushion! aim at the floor to hide it', 'gold');
+        }
+      } else if (!isTeacher()) toast(`${ITEM_ICON[it.kind]} ${nameOf(data.by)} grabbed the ${it.kind}`);
+      break;
+    }
     case 'accuse': if (S.net.isHost()) hostAccuse(from, data.target); break;
     case 'verdict': handleVerdict(data); break;
     case 'riot': {
@@ -381,6 +431,11 @@ function onEvent(ev) {
         S.ringingUntil = now() + 10; S.ringingId = data.id;
         sfx.startRing('clock');
         banner(isTeacher() ? '⏰ WHERE IS THAT RINGING?! Find it!' : '⏰ COVER NOISE — cheat freely!', 3000);
+      } else if (tr.kind === 'cushion') {
+        sfx.honk(); removeTrap(data.id);
+        S.ringingUntil = Math.max(S.ringingUntil, now() + 6);   // the class is in stitches — cover noise
+        banner(isTeacher() ? '💨 WHO PUT A WHOOPEE CUSHION THERE?!' : `💨 PFFFRT! ${nameOf(tr.owner)}'s cushion — cheat freely!`, 3000);
+        sfx.laugh();
       }
       break;
     }
@@ -428,6 +483,8 @@ function handleAct(from, a) {
     case 'raise': gesture(from, '✋ SIR!'); S.handLure = { pid: from, until: now() + 6 };
       if (S.figures[from]) { S.figures[from].raiseHand(true); setTimeout(() => S.figures[from] && S.figures[from].raiseHand(false), 2500); }
       break;
+    case 'stand': S.standingSet[from] = true; sfx.scrape(); gesture(from, '🪑 stands up!', 'rgba(140,60,20,0.8)'); break;
+    case 'sit': delete S.standingSet[from]; sfx.scrape(); break;
   }
 }
 function handleVerdict(v) {
@@ -458,6 +515,8 @@ function startRound(data) {
   S.myTrapUsed = false; S.myNoteUsed = false; S.lastAccuseAt = -99;
   S.stun = 0; S.stuck = 0; S.ringingId = null; S.ringingUntil = 0;
   S.hotSel = -1; S.armedThrow = null; S.sheetOpen = true;
+  S.standing = false; S.standingSet = {}; S.lastOOS = {};
+  S.hasMirror = false; S.hasCushion = false;
   for (const pid in S.seats) S.answers[pid] = Array(N_QUESTIONS).fill(null);
   clearRound(false);
   bots.reset();
@@ -488,7 +547,8 @@ function clearRound(alsoUI = true) {
   S.figures = {}; S.poses = {}; S.walkPh = {}; S.leanUntil = {};
   for (const tr of S.traps.values()) scene.remove(tr.mesh);
   for (const n of S.notes.values()) scene.remove(n.mesh);
-  S.traps.clear(); S.notes.clear();
+  for (const it of S.items.values()) scene.remove(it.mesh);
+  S.traps.clear(); S.notes.clear(); S.items.clear();
   clearBottleLabels();
   sfx.stopRing();
   if (alsoUI) ['sheet', 'teachBar', 'hotbar', 'crosshair', 'prompt', 'helpTip'].forEach(i => show(i, false));
@@ -509,7 +569,8 @@ function setPhase(phase, endsAt) {
 }
 
 // ---------------------------------------------------------------- world objects
-const TRAP_ICON = { marbles: '🔮', glue: '🍯', pepper: '🌶', clock: '⏰' };
+const TRAP_ICON = { marbles: '🔮', glue: '🍯', pepper: '🌶', clock: '⏰', cushion: '💨' };
+const ITEM_ICON = { mirror: '🪞', scrap: '📜', cushion: '💨' };
 function trapMesh(kind, pos) {
   const g = new THREE.Group();
   const m = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, ...o });
@@ -530,8 +591,36 @@ function trapMesh(kind, pos) {
     b.rotation.x = Math.PI / 2; b.position.set(pos[0], 0.13, pos[2]); g.add(b);
     const bell = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), m('#c0a030', { metalness: 0.5, roughness: 0.3 }));
     bell.position.set(pos[0], 0.24, pos[2]); g.add(bell);
+  } else if (kind === 'cushion') {
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.22, 0.05, 16), m('#d86a9a', { roughness: 0.7 }));
+    b.position.set(pos[0], 0.03, pos[2]); g.add(b);
   }
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  scene.add(g);
+  return g;
+}
+// rare item pickups: small props with a glowing halo so they catch your eye
+function itemMesh(kind, pos) {
+  const g = new THREE.Group();
+  const m = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, ...o });
+  if (kind === 'mirror') {
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(0.13, 18), m('#cfe4f2', { metalness: 0.9, roughness: 0.08 }));
+    disc.position.y = 0.3; g.add(disc);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.02, 8, 18), m('#8a6a3a'));
+    rim.position.y = 0.3; g.add(rim);
+  } else if (kind === 'scrap') {
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.16), m('#f2e8b8', { side: THREE.DoubleSide, roughness: 0.95 }));
+    p.rotation.x = -0.9; p.position.y = 0.28; g.add(p);
+  } else {
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.06, 16), m('#d86a9a', { roughness: 0.7 }));
+    b.position.y = 0.28; g.add(b);
+  }
+  for (const ch of g.children) ch.userData.baseY = ch.position.y;
+  const halo = new THREE.Mesh(new THREE.CircleGeometry(0.32, 20),
+    new THREE.MeshBasicMaterial({ color: '#ffd76a', transparent: true, opacity: 0.35, depthWrite: false }));
+  halo.rotation.x = -Math.PI / 2; halo.position.y = 0.02; halo.userData.halo = true;
+  g.add(halo);
+  g.position.set(pos[0], 0, pos[2]);
   scene.add(g);
   return g;
 }
@@ -574,7 +663,7 @@ function bottleLabel(seat) {
   bottleLabels.push({ seat, label });
 }
 function clearBottleLabels() { for (const l of bottleLabels) l.label.parent?.remove(l.label); bottleLabels.length = 0; }
-function gesture(pid, text) { const f = S.figures[pid]; if (f) f.setGesture(text, 2.2, now()); }
+function gesture(pid, text, bg) { const f = S.figures[pid]; if (f) f.setGesture(text, 2.2, now(), bg); }
 function blind(sec) {
   const el = document.createElement('div');
   el.style.cssText = 'position:fixed;inset:0;z-index:60;background:#fff;opacity:.96;transition:opacity .5s';
@@ -687,6 +776,7 @@ addEventListener('keydown', e => {
   const k = e.key;
   if (S.phase === 'prep' && !isTeacher() && '12345'.includes(k)) selectHot(+k - 1);
   if (S.phase === 'exam' && !isTeacher() && !S.expelled[S.myId] && mySeat() != null) {
+    if (e.code === 'Space') { e.preventDefault(); toggleSeat(); }
     if ('1234'.includes(k)) act('signal', { n: +k });
     if (e.code === 'KeyN') $('scrib').classList.contains('hidden') && openScribbler('✍️ Draw your note — then LOOK at a classmate and click to throw', img => { S.armedThrow = img; toast('🎯 look at a classmate and click'); });
     if (e.code === 'KeyF') act('flash');
@@ -707,6 +797,23 @@ addEventListener('pointerup', e => {
 function act(type, extra = {}) {
   if (isTeacher() || S.phase !== 'exam' || S.expelled[S.myId]) return;
   S.net.send('act', { type, ...extra });
+}
+// leave your seat mid-exam to wander (VERY catchable) — SPACE toggles
+function toggleSeat() {
+  const seat = mySeat(); if (seat == null) return;
+  const d = DESKS[seat];
+  if (!S.standing) {
+    S.standing = true;
+    S.me.x = d.x; S.me.z = d.z + 1.0;
+    act('stand');
+    show('sheet', false);
+    toast('🪑 you are OUT OF YOUR SEAT — the teacher can accuse you on sight!', 'red');
+  } else if (Math.hypot(S.me.x - d.x, S.me.z - (d.z + 0.15)) < 1.5) {
+    S.standing = false;
+    S.me.x = d.x; S.me.z = d.z + 0.15; S.me.walk = 0;
+    act('sit');
+    show('sheet', S.sheetOpen);
+  } else toast('get back to YOUR seat to sit down (SPACE)', 'red');
 }
 
 // ---------------------------------------------------------------- crosshair interaction
@@ -779,32 +886,60 @@ function computePrompt() {
       }
       if (!S.prompt) set('🎯 aim at a classmate to throw (N redraws)', () => {});
     } else {
-      // landed note on my desk?
+      // notes: read yours; while OUT OF YOUR SEAT you can swipe anyone's
       for (const [id, n] of S.notes) {
-        if (n.desk !== seat) continue;
         const h = ray.intersectObject(n.mesh, true);
-        if (h.length && h[0].distance < 2.4) {
-          set(n.kind === 'landed' ? '🗒 CLICK — unfold the note' : '🤫 CLICK — read the hidden note', () => {
-            act('readNote');
-            viewer(n.kind === 'landed' ? `🗒 The note from ${nameOf(n.owner)}:` : '🤫 The note under your desk:', n.img);
-            if (n.kind === 'landed') S.net.send('noteGone', { id });
-          });
-          break;
-        }
+        if (!h.length) continue;
+        const mine = n.desk === seat;
+        if (mine ? h[0].distance > 2.4 : !(S.standing && h[0].distance < 2.2)) continue;
+        set(mine ? (n.kind === 'landed' ? '🗒 CLICK — unfold the note' : '🤫 CLICK — read the hidden note')
+                 : '🕵️ CLICK — swipe the note off this desk', () => {
+          act('readNote');
+          viewer(mine ? (n.kind === 'landed' ? `🗒 The note from ${nameOf(n.owner)}:` : '🤫 The note under your desk:')
+                      : `🕵️ You swiped ${nameOf(n.owner)}'s note:`, n.img);
+          if (n.kind === 'landed' || !mine) S.net.send('noteGone', { id });
+        });
+        break;
       }
-      // neighbour's paper → peek
+      // a classmate's paper → peek. Adjacent from your seat; ANY desk you walk
+      // up to while standing; ANY desk from your seat with the 🪞 mirror
       if (!S.prompt) {
         const h = ray.intersectObjects(room.paperMeshes);
-        if (h.length && h[0].distance < 3.4) {
+        if (h.length) {
           const deskIdx = room.paperMeshes.indexOf(h[0].object);
           const owner = Object.keys(S.seats).find(pid => S.seats[pid] === deskIdx);
-          if (owner && owner !== S.myId && seatAdjacent(deskIdx, seat)) {
-            const dir = DESKS[deskIdx].x > DESKS[seat].x ? 1 : -1;
-            set(`👀 CLICK — peek at ${nameOf(owner)}'s paper`, () => act('peek', { target: owner, dir }));
-          } else if (deskIdx === seat) {
+          const dist = h[0].distance;
+          if (owner && owner !== S.myId) {
+            const near = S.standing ? dist < 2.8 : (seatAdjacent(deskIdx, seat) && dist < 3.4);
+            const mirror = !near && !S.standing && S.hasMirror && dist < 14;
+            if (near || mirror) {
+              const dir = DESKS[deskIdx].x > DESKS[seat].x ? 1 : -1;
+              set(`${mirror ? '🪞' : '👀'} CLICK — peek at ${nameOf(owner)}'s paper`, () => act('peek', { target: owner, dir }));
+            }
+          } else if (deskIdx === seat && !S.standing && dist < 3.4) {
             set('📄 CLICK — ' + (S.sheetOpen ? 'put your paper down (TAB)' : 'pick up your paper (TAB)'),
               () => { S.sheetOpen = !S.sheetOpen; show('sheet', S.sheetOpen); });
           }
+        }
+      }
+      // rare item on the floor → grab it (you'll have to leave your seat…)
+      if (!S.prompt) for (const [id, it] of S.items) {
+        const h = ray.intersectObject(it.mesh, true);
+        if (h.length && h[0].distance < 2.6) {
+          set(`${ITEM_ICON[it.kind]} CLICK — grab the ${it.kind}`, () => S.net.send('itemGet', { id }));
+          break;
+        }
+      }
+      // carrying the whoopee cushion → hide it on the floor
+      if (!S.prompt && S.hasCushion) {
+        const hit = new THREE.Vector3();
+        if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit) &&
+            Math.abs(hit.x) < ROOM.x && Math.abs(hit.z) < ROOM.z &&
+            hit.distanceTo(new THREE.Vector3(S.me.x, 0, S.me.z)) < 3) {
+          set('💨 CLICK — hide the whoopee cushion here', () => {
+            S.net.send('trap', { id: 'tr-' + makeId().slice(0, 5), kind: 'cushion', pos: [hit.x, 0, hit.z] });
+            S.hasCushion = false;
+          });
         }
       }
       // my bottle → rig / read
@@ -825,7 +960,7 @@ function computePrompt() {
 // ---------------------------------------------------------------- frame loop
 function canWalk() {
   if (isTeacher()) return ['prep', 'inspect', 'exam'].includes(S.phase);
-  return S.phase === 'prep';
+  return S.phase === 'prep' || (S.phase === 'exam' && S.standing);
 }
 let last = performance.now();
 function frame(nowMs) {
@@ -862,12 +997,13 @@ function frame(nowMs) {
     const pose = p.id === S.myId ? S.me : S.poses[p.id];
     const seat = S.seats[p.id];
     const isT = p.id === S.teacherId;
+    const standing = p.id === S.myId ? S.standing : S.standingSet[p.id];
     if (S.expelled[p.id]) {
-      f.setPos(STOOL.x, STOOL.z, -0.6); f.group.position.y = 0.35; f.sit();
-    } else if (!isT && seat != null && S.phase !== 'prep') {
+      f.setPos(STOOL.x, STOOL.z, -0.6); f.group.position.y = 0.03; f.sit();
+    } else if (!isT && seat != null && S.phase !== 'prep' && !standing) {
       const d = DESKS[seat];
       f.setPos(d.x, d.z + 0.15, Math.PI);
-      f.group.position.y = 0.34;
+      f.group.position.y = 0.03;
       f.sit();
       const L = S.leanUntil[p.id];
       f.lean(L && t < L.until ? L.dir : 0);
@@ -887,9 +1023,9 @@ function frame(nowMs) {
     camera.lookAt(0, 1.0, -1);
   } else {
     let ex, ey, ez;
-    if (S.expelled[S.myId]) { ex = STOOL.x; ey = 1.15; ez = STOOL.z; }
+    if (S.expelled[S.myId]) { ex = STOOL.x; ey = 1.42; ez = STOOL.z; }
     else if (canWalk()) { ex = S.me.x; ey = 1.42; ez = S.me.z; }
-    else { const d = DESKS[mySeat() ?? 0]; ex = d.x; ey = 1.30; ez = d.z + 0.15; }
+    else { const d = DESKS[mySeat() ?? 0]; ex = d.x; ey = 1.38; ez = d.z + 0.15; }
     camera.position.set(ex, ey, ez);
     camera.rotation.set(0, 0, 0, 'YXZ');
     camera.rotation.order = 'YXZ';
@@ -920,6 +1056,19 @@ function frame(nowMs) {
     $('dutyLine').textContent = S.duty ? (S.duty.kind === 'phone' ? '📞 Answer the phone!' : '🖊 Write on the board!') : '';
   }
   if (room.clockHand) room.clockHand.rotation.z = -t * 0.35;
+
+  // item pickups shimmer and slowly spin so they catch the eye
+  for (const it of S.items.values()) {
+    it.mesh.rotation.y += dt * 1.3;
+    for (const ch of it.mesh.children)
+      if (!ch.userData.halo) ch.position.y = ch.userData.baseY + Math.sin(t * 2.4 + it.mesh.position.x) * 0.045;
+  }
+
+  // tension chips: "out of seat" reminder + teacher-proximity warning
+  const inDanger = !isTeacher() && S.phase === 'exam' && !S.expelled[S.myId] && mySeat() != null;
+  $('oos').style.opacity = inDanger && S.standing ? 1 : 0;
+  const tp2 = inDanger && S.teacherId !== S.myId ? S.poses[S.teacherId] : null;
+  $('tnear').style.opacity = tp2 && Math.hypot(tp2.x - S.me.x, tp2.z - S.me.z) < 3.0 ? 1 : 0;
 
   renderer.render(scene, camera);
 }
@@ -958,7 +1107,8 @@ window.__game = {
     return { phase: S.phase, roster: S.roster.length, role: S.myRole, code: S.code,
       answers: S.answers[S.myId], strikes: { ...S.strikes }, expelled: { ...S.expelled },
       authority: S.authority, inspection: S.inspection, traps: S.traps.size, notes: S.notes.size,
-      prompt: S.prompt && S.prompt.text, isHost: S.net ? S.net.isHost() : false, country: S.exam && S.exam.country };
+      prompt: S.prompt && S.prompt.text, isHost: S.net ? S.net.isHost() : false, country: S.exam && S.exam.country,
+      standing: S.standing, items: S.items.size, hasMirror: S.hasMirror, hasCushion: S.hasCushion };
   },
   skipPhase() { if (S.net && S.net.isHost()) S.phaseEnds = 0; },
   look(yaw, pitch) { S.yaw = yaw; S.pitch = pitch || 0; },
@@ -975,4 +1125,6 @@ window.__game = {
     S.net.send('throw', { id: 'nt-' + makeId().slice(0, 5), to: pid, img: cv.toDataURL('image/png') });
   },
   students: () => students().map(p => ({ id: p.id, name: p.name })),
+  toggleSeat,
+  itemsAt: () => [...S.items.values()].map(i => ({ id: i.id, kind: i.kind, pos: i.pos })),
 };
