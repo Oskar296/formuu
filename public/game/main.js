@@ -336,7 +336,7 @@ function onEvent(ev) {
       break;
     }
     case 'throw': {
-      sfx.paper();
+      sfx.paper(volFor(from));
       logCheat(from, 'throwing a note', data.img);
       gesture(from, '🗒 yeet!');
       const targetSeat = S.seats[data.to];
@@ -428,16 +428,17 @@ function onEvent(ev) {
       const tr = S.traps.get(data.id); if (!tr || !tr.armed) break;
       tr.armed = false;
       const who = nameOf(tr.owner);
+      const tv = volAt(tr.pos[0], tr.pos[2]);
       if (tr.kind === 'marbles') {
-        sfx.crash(); removeTrap(data.id);
+        sfx.crash(tv); removeTrap(data.id);
         if (isTeacher()) { S.stun = now() + 2.2; banner('💫 MARBLES! WHO PUT MARBLES THERE?!'); }
         else banner(`💫 The teacher slipped on ${who}'s marbles!`);
       } else if (tr.kind === 'glue') {
-        sfx.squelch(); removeTrap(data.id);
+        sfx.squelch(tv); removeTrap(data.id);
         if (isTeacher()) { S.stuck = now() + 2.6; banner('🍯 YOUR SHOES ARE GLUED DOWN'); }
         else banner(`🍯 The teacher stepped in ${who}'s glue!`);
       } else if (tr.kind === 'pepper') {
-        sfx.sneeze(); removeTrap(data.id);
+        sfx.sneeze(tv); removeTrap(data.id);
         if (isTeacher()) { blind(2.6); banner('🤧 A PEPPER ERASER?! I CANNOT SEE!'); }
         else banner(`🤧 ${who}'s pepper eraser goes off!`);
       } else if (tr.kind === 'clock') {
@@ -445,7 +446,7 @@ function onEvent(ev) {
         sfx.startRing('clock');
         banner(isTeacher() ? '⏰ WHERE IS THAT RINGING?! Find it!' : '⏰ COVER NOISE — cheat freely!', 3000);
       } else if (tr.kind === 'cushion') {
-        sfx.honk(); removeTrap(data.id);
+        sfx.honk(volAt(tr.pos[0], tr.pos[2])); removeTrap(data.id);
         S.ringingUntil = Math.max(S.ringingUntil, now() + 6);   // the class is in stitches — cover noise
         banner(isTeacher() ? '💨 WHO PUT A WHOOPEE CUSHION THERE?!' : `💨 PFFFRT! ${nameOf(tr.owner)}'s cushion — cheat freely!`, 3000);
         sfx.laugh();
@@ -469,6 +470,20 @@ function onEvent(ev) {
     case 'results': showResults(data); break;
   }
 }
+// how loud someone's noise is for ME: full volume up close, a murmur across
+// the room. This is what keeps nine cheating bots from being a wall of sound.
+function volFor(pid) {
+  if (pid === S.myId) return 1;
+  let px, pz;
+  const pose = S.poses[pid];
+  if (pose && pose.x !== undefined && S.standingSet[pid]) { px = pose.x; pz = pose.z; }
+  else if (S.seats[pid] != null) { const d = DESKS[S.seats[pid]]; px = d.x; pz = d.z; }
+  else if (pose && pose.x !== undefined) { px = pose.x; pz = pose.z; }
+  else return 0.5;
+  const d = Math.hypot(px - S.me.x, pz - S.me.z);
+  return Math.max(0.06, Math.min(1, 1.9 / (1 + d)));
+}
+const volAt = (x, z) => Math.max(0.12, Math.min(1, 2.4 / (1 + Math.hypot(x - S.me.x, z - S.me.z))));
 function handleAct(from, a) {
   switch (a.type) {
     case 'signal': logCheat(from, 'hand signals');
@@ -491,13 +506,13 @@ function handleAct(from, a) {
       if (from === S.myId && (S.attach[from] || {}).bottle) viewer('🍼 Your bottle label:', S.attach[from].bottle);
       break;
     case 'readNote': logCheat(from, 'reading a hidden note'); gesture(from, '🤫 reaches under the desk'); break;
-    case 'tap': sfx.tap(); logBurst(from, 'tapping in code'); gesture(from, '👇 tap'); break;
-    case 'cough': sfx.cough(); logBurst(from, 'coughing in code'); gesture(from, '😷 KHM!'); break;
+    case 'tap': sfx.tap(volFor(from)); logBurst(from, 'tapping in code'); gesture(from, '👇 tap'); break;
+    case 'cough': sfx.cough(volFor(from)); logBurst(from, 'coughing in code'); gesture(from, '😷 KHM!'); break;
     case 'raise': gesture(from, '✋ SIR!'); S.handLure = { pid: from, until: now() + 6 };
       if (S.figures[from]) { S.figures[from].raiseHand(true); setTimeout(() => S.figures[from] && S.figures[from].raiseHand(false), 2500); }
       break;
-    case 'stand': S.standingSet[from] = true; sfx.scrape(); gesture(from, '🪑 stands up!', 'rgba(140,60,20,0.8)'); break;
-    case 'sit': delete S.standingSet[from]; sfx.scrape(); break;
+    case 'stand': S.standingSet[from] = true; sfx.scrape(volFor(from)); gesture(from, '🪑 stands up!', 'rgba(140,60,20,0.8)'); break;
+    case 'sit': delete S.standingSet[from]; sfx.scrape(volFor(from) * 0.7); break;
   }
 }
 function handleVerdict(v) {
