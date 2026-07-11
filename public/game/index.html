@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>THE EXAM — cheat together, don't get caught</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📝</text></svg>">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #14161f; touch-action: none; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; color: #f0ede4; user-select: none; -webkit-user-select: none; }
+  #c { position: fixed; inset: 0; display: block; }
+  button { font-family: inherit; cursor: pointer; }
+  .hidden { display: none !important; }
+  .dim { opacity: .55; }
+
+  /* ---------- overlays ---------- */
+  .ov { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; background: rgba(12,14,22,.78); backdrop-filter: blur(5px); text-align: center; padding: 18px; }
+  #menu { background: linear-gradient(100deg, rgba(12,14,22,.1) 40%, rgba(12,14,22,.85) 62%);
+    backdrop-filter: none; flex-direction: row; justify-content: flex-end; }
+  #menuRight { display: flex; flex-direction: column; align-items: center; margin-right: 4vw; }
+  h1.logo { font-size: clamp(34px, 6vw, 58px); font-weight: 900; letter-spacing: 3px;
+    text-shadow: 0 3px 0 #8a2f2f, 0 7px 24px rgba(0,0,0,.6); }
+  .tag { letter-spacing: 4px; font-size: 12.5px; opacity: .65; margin-top: 6px; }
+  .card { margin-top: 22px; background: #232837ee; border: 1px solid #3a4156; border-radius: 16px;
+    padding: 20px 24px; width: min(420px, 92vw); }
+  .prow { display: flex; gap: 10px; margin-bottom: 12px; }
+  .prow input { flex: 1; padding: 11px 13px; border-radius: 10px; border: 1px solid #4a5270;
+    background: #171b26; color: #f0ede4; font-size: 15.5px; text-align: center; }
+  #chalkBadge { display: flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 10px;
+    background: #171b26; border: 1px solid #6a5a2e; color: #ffd76a; font-weight: 800; }
+  .roleRow { display: flex; gap: 10px; margin-bottom: 12px; }
+  .roleRow button { flex: 1; padding: 11px; border-radius: 10px; border: 1px solid #4a5270;
+    background: #171b26; color: #cfd3e0; font-size: 14.5px; }
+  .roleRow button.sel { background: #3a4a7a; border-color: #7a8ac9; color: #fff; }
+  .bigBtn { width: 100%; padding: 13px; font-size: 16px; font-weight: 800; letter-spacing: 1px;
+    border: none; border-radius: 10px; background: linear-gradient(120deg, #e0b64e, #d68a3f); color: #241a08; }
+  .bigBtn.green { background: linear-gradient(120deg, #8fd39e, #5aa86b); color: #12210f; margin-bottom: 10px; }
+  .bigBtn:disabled { filter: grayscale(.8); opacity: .5; cursor: default; }
+  .row2 { display: flex; gap: 10px; margin-top: 10px; }
+  .row2 input { flex: 1; padding: 11px; border-radius: 10px; border: 1px solid #4a5270; background: #171b26;
+    color: #f0ede4; font-size: 15px; text-align: center; text-transform: uppercase; }
+  .row2 button { padding: 0 20px; border-radius: 10px; border: 1px solid #4a5270; background: #2c3247; color: #f0ede4; font-weight: 700; }
+  .note { font-size: 11.5px; opacity: .55; margin-top: 12px; line-height: 1.5; }
+  #btnLocker { width: 100%; padding: 10px; font-size: 13.5px; font-weight: 700; letter-spacing: 1px; margin-top: 10px;
+    border-radius: 10px; border: 1px solid #4a5270; background: #2c3247; color: #eaeef8; }
+
+  /* lobby */
+  #roomCodeBig { font-size: 46px; font-weight: 900; letter-spacing: 12px; color: #e0b64e; margin: 6px 0; }
+  #roster { margin: 14px 0; display: flex; flex-direction: column; gap: 6px; width: 100%; }
+  #roster div { background: #171b26; border-radius: 8px; padding: 8px 12px; font-size: 14.5px;
+    display: flex; justify-content: space-between; }
+  #lobbyHint { font-size: 12.5px; opacity: .65; margin-top: 4px; }
+
+  /* locker */
+  #lockerGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
+    width: min(700px, 94vw); max-height: 58vh; overflow-y: auto; margin-top: 16px; }
+  .skinCard { background: #232837; border: 2px solid #3a4156; border-radius: 14px; padding: 14px 10px;
+    cursor: pointer; transition: .12s; }
+  .skinCard:hover { transform: translateY(-2px); border-color: #7a8ac9; }
+  .skinCard.equipped { border-color: #e0b64e; box-shadow: 0 0 16px rgba(224,182,78,.25); }
+  .skinCard.locked { filter: saturate(.4) brightness(.75); }
+  .skinCard .em { font-size: 40px; }
+  .skinCard .nm { font-size: 13px; font-weight: 700; margin-top: 6px; }
+  .skinCard .pr { font-size: 11.5px; margin-top: 4px; color: #ffd76a; }
+  .skinCard .pr.own { color: #8fe39e; }
+
+  /* results */
+  #resultsRows { margin: 14px 0; display: flex; flex-direction: column; gap: 5px; width: min(420px, 90vw); }
+  #resultsRows div { display: flex; justify-content: space-between; background: #171b26; border-radius: 8px;
+    padding: 8px 14px; font-size: 15px; }
+  #resultsRows .val { color: #e0b64e; font-weight: 800; }
+  #avgLine { font-size: 18px; margin-top: 4px; }
+
+  /* ---------- HUD ---------- */
+  .hud { position: fixed; z-index: 20; pointer-events: none; }
+  #topbar { top: 12px; left: 50%; transform: translateX(-50%); text-align: center;
+    background: rgba(14,16,24,.62); border-radius: 12px; padding: 6px 22px; backdrop-filter: blur(4px); }
+  #phaseLabel { font-size: 10px; letter-spacing: 3px; opacity: .65; }
+  #phaseTimer { font-size: 23px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  #banner { top: 19%; left: 50%; transform: translateX(-50%); font-size: clamp(20px, 3.6vw, 34px); font-weight: 900;
+    letter-spacing: 2px; color: #ffd76a; text-shadow: 0 3px 16px rgba(0,0,0,.85); opacity: 0; transition: opacity .3s;
+    text-align: center; max-width: 92vw; }
+  #toasts { bottom: 66px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column-reverse;
+    gap: 6px; align-items: center; }
+  .toast { background: rgba(18,21,32,.92); border: 1px solid #3a4156; border-radius: 10px; padding: 7px 15px;
+    font-size: 13.5px; animation: tIn .25s ease-out; max-width: 80vw; }
+  .toast.gold { border-color: #e0b64e; color: #ffd76a; }
+  .toast.red { border-color: #c05050; color: #ff9a9a; }
+  @keyframes tIn { from { opacity: 0; transform: translateY(10px); } }
+
+  /* exam sheet */
+  #sheet { top: 62px; right: 12px; width: 300px; max-height: calc(100vh - 150px); overflow-y: auto;
+    background: repeating-linear-gradient(#f6f1e0, #f6f1e0 26px, #e9e2cc 27px); color: #2a2418;
+    border-radius: 4px 10px 10px 4px; padding: 12px 13px 12px 22px; pointer-events: auto;
+    box-shadow: 0 10px 34px rgba(0,0,0,.55); font-size: 13px; transform: rotate(.4deg);
+    border-left: 3px solid rgba(190,90,90,.5); }
+  #sheet h3 { font-size: 13px; letter-spacing: 1px; margin-bottom: 6px; color: #6a1f1f; font-family: Georgia, serif; }
+  .q { padding: 5px 4px; border-radius: 6px; margin-bottom: 2px; }
+  .q .qt { font-weight: 600; line-height: 1.3; }
+  .q.studied .qt::after { content: ' 📖'; }
+  .q .opts { display: flex; gap: 5px; margin-top: 4px; }
+  .q .opts button { flex: 1; padding: 3px 0; border-radius: 6px; border: 1px solid #b9ac8a;
+    background: rgba(250,246,234,.7); font-size: 12px; font-weight: 700; color: #4a3f28; }
+  .q .opts button.pick { background: #33508c; border-color: #33508c; color: #fff; }
+
+  /* action bar (students, exam phase) */
+  #actions { bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 7px; flex-wrap: wrap;
+    justify-content: center; pointer-events: auto; max-width: 96vw; }
+  #actions button { background: rgba(23,27,38,.92); border: 1px solid #3a4156; color: #e8ecf5;
+    border-radius: 10px; padding: 8px 11px; font-size: 12.5px; font-weight: 600; }
+  #actions button:hover { border-color: #7a8ac9; }
+  #actions button:disabled { opacity: .35; }
+  #actions button.hot { border-color: #e0b64e; color: #ffd76a; }
+
+  /* teacher HUD */
+  #teachBar { top: 62px; left: 12px; width: 180px; background: rgba(14,16,24,.66); border-radius: 12px;
+    padding: 12px; font-size: 12px; backdrop-filter: blur(4px); }
+  #teachBar .lbl { font-size: 9.5px; letter-spacing: 2px; opacity: .6; margin-bottom: 3px; }
+  .meter { height: 8px; border-radius: 5px; background: #2a2f40; overflow: hidden; margin-bottom: 9px; }
+  .meter i { display: block; height: 100%; border-radius: 5px; transition: width .3s; }
+  #authFill i { background: linear-gradient(90deg, #e0b64e, #d68a3f); }
+  #inspFill i { background: linear-gradient(90deg, #6aa8e0, #4e86c7); }
+  #dutyLine { color: #ffd76a; font-weight: 700; margin-bottom: 6px; min-height: 15px; }
+  #accuseLine { opacity: .8; min-height: 28px; }
+  #strikeList { margin-top: 6px; opacity: .85; line-height: 1.6; }
+
+  /* trap tray (prep) */
+  #trapTray { bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; pointer-events: auto; }
+  #trapTray button { background: rgba(23,27,38,.92); border: 1px solid #3a4156; color: #e8ecf5;
+    border-radius: 12px; padding: 10px 13px; font-size: 13px; font-weight: 600; }
+  #trapTray button.sel { border-color: #e0b64e; color: #ffd76a; }
+  #trapTray button:disabled { opacity: .35; }
+
+  /* scribbler */
+  #scrib { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+    background: rgba(10,12,18,.72); }
+  #scribCard { background: #232837; border: 1px solid #3a4156; border-radius: 16px; padding: 16px; text-align: center; }
+  #scribCanvas { background: #f6f1e0; border-radius: 8px; cursor: crosshair; touch-action: none; }
+  #scribRow { display: flex; gap: 8px; margin-top: 10px; justify-content: center; }
+  #scribRow button { padding: 9px 16px; border-radius: 9px; border: 1px solid #4a5270; background: #2c3247;
+    color: #f0ede4; font-weight: 700; font-size: 13.5px; }
+  #scribRow button.gold { background: linear-gradient(120deg, #e0b64e, #d68a3f); color: #241a08; border: none; }
+
+  /* viewer (notes read aloud, peeks) */
+  #viewer { position: fixed; inset: 0; z-index: 55; display: flex; align-items: center; justify-content: center;
+    background: rgba(10,12,18,.7); }
+  #viewerCard { background: #232837; border: 1px solid #3a4156; border-radius: 16px; padding: 16px; text-align: center;
+    max-width: 92vw; }
+  #viewerTitle { font-size: 14.5px; margin-bottom: 10px; max-width: 460px; line-height: 1.4; }
+  #viewerImg { background: #f6f1e0; border-radius: 8px; max-width: min(440px, 88vw); }
+  #viewerClose { margin-top: 12px; padding: 9px 26px; border-radius: 9px; border: none;
+    background: linear-gradient(120deg, #e0b64e, #d68a3f); color: #241a08; font-weight: 800; }
+
+  #hintBar { bottom: 66px; left: 50%; transform: translateX(-50%); font-size: 12px; opacity: .6;
+    background: rgba(14,16,24,.55); padding: 5px 14px; border-radius: 999px; white-space: nowrap; }
+  #soundBtn { position: fixed; bottom: 12px; right: 12px; z-index: 45; background: rgba(23,27,38,.9);
+    border: 1px solid #3a4156; border-radius: 10px; padding: 6px 10px; font-size: 15px; color: #fff; }
+  #riotVignette { position: fixed; inset: 0; z-index: 15; pointer-events: none; opacity: 0; transition: opacity .4s;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(255,60,30,.4) 100%); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="riotVignette"></div>
+
+<!-- MENU -->
+<div class="ov" id="menu">
+  <div id="menuRight">
+    <h1 class="logo">📝 THE EXAM</h1>
+    <div class="tag">CHEAT TOGETHER · DON'T GET CAUGHT</div>
+    <div class="card">
+      <div class="prow">
+        <input type="text" id="nameInput" maxlength="14" placeholder="pick a username">
+        <div id="chalkBadge">🖍 <span id="chalkCount">0</span></div>
+      </div>
+      <div class="roleRow">
+        <button id="roleStudent" class="sel">🙋 Student</button>
+        <button id="roleTeacher">🧑‍🏫 Teacher</button>
+      </div>
+      <button class="bigBtn green" id="btnSolo">🤖 PLAY SOLO — vs bots</button>
+      <button class="bigBtn" id="btnCreate">CREATE CLASSROOM</button>
+      <div class="row2">
+        <input type="text" id="codeInput" maxlength="4" placeholder="CODE">
+        <button id="btnJoin">JOIN</button>
+      </div>
+      <button id="btnLocker">🎒 LOCKER — skins</button>
+      <div class="note" id="netNote"></div>
+    </div>
+  </div>
+</div>
+
+<!-- LOBBY -->
+<div class="ov hidden" id="lobby">
+  <div class="card" style="text-align:center">
+    <div class="dim" style="letter-spacing:3px;font-size:11px">CLASSROOM CODE</div>
+    <div id="roomCodeBig">----</div>
+    <div id="roster"></div>
+    <button class="bigBtn" id="btnStart" disabled>START THE EXAM</button>
+    <div id="lobbyHint"></div>
+  </div>
+</div>
+
+<!-- LOCKER -->
+<div class="ov hidden" id="locker">
+  <h1 class="logo" style="font-size:34px">🎒 LOCKER</h1>
+  <div class="tag">EARN 🖍 CHALK BY PLAYING ROUNDS</div>
+  <div id="lockerGrid"></div>
+  <button class="bigBtn" style="width:min(320px,90vw);margin-top:16px" id="btnLockerClose">DONE</button>
+</div>
+
+<!-- RESULTS -->
+<div class="ov hidden" id="results">
+  <h1 class="logo" id="resultTitle">—</h1>
+  <div id="avgLine"></div>
+  <div id="resultsRows"></div>
+  <button class="bigBtn" style="width:min(360px,90vw)" id="btnAgain">BACK TO LOBBY</button>
+</div>
+
+<!-- HUD -->
+<div class="hud" id="topbar"><div id="phaseLabel">—</div><div id="phaseTimer">–:––</div></div>
+<div class="hud" id="banner"></div>
+<div class="hud" id="toasts"></div>
+<div class="hud hidden" id="hintBar"></div>
+
+<div class="hud hidden" id="sheet"><h3>📝 FINAL EXAM — <span id="sheetCountry"></span></h3><div id="sheetQs"></div></div>
+
+<div class="hud hidden" id="actions">
+  <button id="actWrite">✍️ Note (N)</button>
+  <button id="actSig1">☝️ 1</button><button id="actSig2">✌️ 2</button><button id="actSig3">🤟 3</button><button id="actSig4">🖐 4</button>
+  <button id="actTap">👇 Tap (T)</button>
+  <button id="actCough">😷 Cough (C)</button>
+  <button id="actPeek">👀 Peek (E)</button>
+  <button id="actFlash">📄 Flash (F)</button>
+  <button id="actArm">💪 Arm (V)</button>
+  <button id="actBottle">🍼 Bottle (B)</button>
+  <button id="actRaise">✋ Sir! (R)</button>
+</div>
+
+<div class="hud hidden" id="teachBar">
+  <div class="lbl">AUTHORITY</div><div class="meter" id="authFill"><i style="width:100%"></i></div>
+  <div class="lbl">INSPECTION</div><div class="meter" id="inspFill"><i style="width:100%"></i></div>
+  <div id="dutyLine"></div>
+  <div id="accuseLine"></div>
+  <div id="strikeList"></div>
+</div>
+
+<div class="hud hidden" id="trapTray">
+  <button data-trap="marbles">🔮 Marbles</button>
+  <button data-trap="glue">🍯 Glue</button>
+  <button data-trap="pepper">🌶 Pepper eraser</button>
+  <button data-trap="clock">⏰ Alarm clock</button>
+  <button data-trap="note">📝 Hide a note</button>
+</div>
+
+<!-- SCRIBBLER -->
+<div id="scrib" class="hidden">
+  <div id="scribCard">
+    <div style="font-size:14px;margin-bottom:8px" id="scribTitle">✍️ Draw your note — anything goes</div>
+    <canvas id="scribCanvas" width="360" height="240"></canvas>
+    <div id="scribRow">
+      <button id="scribClear">Clear</button>
+      <button id="scribCancel">Cancel</button>
+      <button id="scribOk" class="gold">Done ➜</button>
+    </div>
+  </div>
+</div>
+
+<!-- VIEWER -->
+<div id="viewer" class="hidden">
+  <div id="viewerCard">
+    <div id="viewerTitle"></div>
+    <img id="viewerImg" alt="note">
+    <br><button id="viewerClose">OK</button>
+  </div>
+</div>
+
+<button id="soundBtn">🔊</button>
+
+<script src="./vendor/supabase.umd.js"></script>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
