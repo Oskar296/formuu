@@ -135,7 +135,7 @@ const hex2rgb = h => { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >
 // top-down gradient so big walls catch light unevenly instead of reading flat
 const paintTex = (hex) => {
   const [r, g, bl] = hex2rgb(hex);
-  return tex(256, 256, (c, w, h) => {
+  return tex(384, 384, (c, w, h) => {
     const grad = c.createLinearGradient(0, 0, 0, h);
     grad.addColorStop(0, `rgb(${clamp(r + 10)},${clamp(g + 10)},${clamp(bl + 10)})`);
     grad.addColorStop(1, `rgb(${clamp(r - 12)},${clamp(g - 12)},${clamp(bl - 12)})`);
@@ -156,7 +156,7 @@ const paintTex = (hex) => {
 // wood grain for desktops: flowing streaks + the odd knot
 const woodGrainTex = (base) => {
   const [r, g, bl] = hex2rgb(base);
-  return tex(256, 256, (c, w, h) => {
+  return tex(384, 384, (c, w, h) => {
     c.fillStyle = base; c.fillRect(0, 0, w, h);
     for (let i = 0; i < 30; i++) {
       const yy = (i / 30) * h + (Math.random() - 0.5) * 6, a = (Math.random() - 0.5) * 40;
@@ -531,6 +531,21 @@ export function buildWorld(scene, mapId = 'classroom') {
     : new THREE.MeshStandardMaterial({ map: woodGrainTex(PAL.deskTop), roughness: 0.48 });
   const leg = mat(PAL.leg, { roughness: 0.4, metalness: 0.35 });
   const edgeM = mat(PAL.leg, { roughness: 0.5, metalness: 0.25 });
+  const bottleCol = ['#7ab8e0', '#e08fb4', '#8fd0a0', '#e0c47a', '#a89ae0'];
+  // a printed exam sheet: ruled lines, red margin, header and a couple of marks
+  const paperTex = tex(280, 360, (c, w, h) => {
+    c.fillStyle = '#f7f2e2'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 500; i++) { c.fillStyle = `rgba(180,168,138,${Math.random() * 0.07})`; c.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
+    c.strokeStyle = '#cf9a94'; c.lineWidth = 2; c.beginPath(); c.moveTo(30, 0); c.lineTo(30, h); c.stroke();
+    c.fillStyle = '#6a2020'; c.font = 'bold 22px Georgia'; c.fillText('FINAL EXAM', 42, 34);
+    c.strokeStyle = 'rgba(90,110,150,0.32)'; c.lineWidth = 1.4;
+    for (let y = 54; y < h - 12; y += 22) { c.beginPath(); c.moveTo(36, y); c.lineTo(w - 14, y); c.stroke(); }
+    c.strokeStyle = 'rgba(35,35,55,0.55)'; c.lineWidth = 2.2;
+    for (let k = 0; k < 6; k++) {
+      const y = 70 + k * 40; c.beginPath(); c.moveTo(44, y);
+      c.bezierCurveTo(80, y - 7, 140, y + 5, 70 + Math.random() * 120, y - 1); c.stroke();
+    }
+  });
   DESKS.forEach((d, i) => {
     const top = add(new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.07, 1.0), wood));
     top.position.set(d.x, 1.07, d.deskZ); top.castShadow = top.receiveShadow = true;
@@ -550,15 +565,23 @@ export function buildWorld(scene, mapId = 'classroom') {
       const sb = add(new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.78, 8), leg));
       sb.position.set(d.x + lx, 0.26, d.deskZ); sb.rotation.x = Math.PI / 2;
     }
-    const paper = add(new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.72), mat('#f4efdd', { roughness: 0.95 })));
+    const paper = add(new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.72), new THREE.MeshStandardMaterial({ map: paperTex, roughness: 0.95 })));
     paper.rotation.x = -Math.PI / 2; paper.rotation.z = 0.06;
-    paper.position.set(d.x + 0.15, 1.105, d.deskZ + 0.02);
+    paper.position.set(d.x + 0.15, 1.115, d.deskZ + 0.02);
     paperMeshes.push(paper);
-    const bottle = add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.075, 0.34, 14), mat('#5aa3d8', { roughness: 0.3 })));
-    bottle.position.set(d.x - 0.6, 1.27, d.deskZ - 0.25); bottle.castShadow = true;
+    // rounded water bottle: translucent body, shoulder, cap, and a label band
+    const bMat = new THREE.MeshStandardMaterial({ color: bottleCol[i % bottleCol.length], roughness: 0.14, metalness: 0.05, transparent: true, opacity: 0.9 });
+    const bottle = add(new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.072, 0.3, 20), bMat));
+    bottle.position.set(d.x - 0.6, 1.25, d.deskZ - 0.25); bottle.castShadow = true;
     bottleMeshes.push(bottle);
-    const cap = add(new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.07, 12), mat('#2d5b80', { roughness: 0.4 })));
-    cap.position.set(d.x - 0.6, 1.47, d.deskZ - 0.25);
+    const shoulder = add(new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.068, 0.07, 18), bMat));
+    shoulder.position.set(d.x - 0.6, 1.435, d.deskZ - 0.25);
+    const neck = add(new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.04, 12), bMat));
+    neck.position.set(d.x - 0.6, 1.485, d.deskZ - 0.25);
+    const cap = add(new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.05, 14), mat('#2d5b80', { roughness: 0.4 })));
+    cap.position.set(d.x - 0.6, 1.52, d.deskZ - 0.25);
+    const label = add(new THREE.Mesh(new THREE.CylinderGeometry(0.0735, 0.0735, 0.13, 20, 1, true), mat('#eef2ee', { roughness: 0.75, side: THREE.DoubleSide })));
+    label.position.set(d.x - 0.6, 1.235, d.deskZ - 0.25);
     if (mapId === 'lab') {
       const fl = add(new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 10),
         mat(['#5ac07a', '#c05a8a', '#d8b04e'][i % 3], { roughness: 0.25, transparent: true, opacity: 0.85 })));
@@ -567,14 +590,24 @@ export function buildWorld(scene, mapId = 'classroom') {
       const bk = add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.22), mat(['#8a3a34', '#3a5a8a', '#3f7a4c'][i % 3], { roughness: 0.8 })));
       bk.position.set(d.x + 0.6, 1.13, d.deskZ + 0.25); bk.rotation.y = 0.4;
     }
-    // chair
-    const seat = add(new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.07, 0.8), mat(PAL.chair, { roughness: 0.6 })));
-    seat.position.set(d.x, 0.62, d.z + 0.15); seat.castShadow = true;
-    const back = add(new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.75, 0.07), mat(PAL.chair, { roughness: 0.6 })));
-    back.position.set(d.x, 1.02, d.z + 0.5);
-    for (const [lx, lz] of [[-0.36, -0.3], [0.36, -0.3], [-0.36, 0.42], [0.36, 0.42]]) {
-      const l = add(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.6, 8), leg));
-      l.position.set(d.x + lx, 0.31, d.z + 0.15 + lz);
+    // contoured moulded-plastic chair on a tapered metal-tube frame
+    const cz = d.z + 0.15, cMat = mat(PAL.chair, { roughness: 0.5, metalness: 0.05 });
+    const seat = add(new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.055, 0.72, 2, 1, 2), cMat));
+    seat.position.set(d.x, 0.6, cz); seat.rotation.x = -0.04; seat.castShadow = true;
+    const seatLip = add(new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.8, 12), cMat));
+    seatLip.rotation.z = Math.PI / 2; seatLip.position.set(d.x, 0.585, cz - 0.35);
+    const back = add(new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.44, 0.05, 2, 1, 1), cMat));
+    back.position.set(d.x, 1.0, cz + 0.34); back.rotation.x = 0.14; back.castShadow = true;
+    const topBar = add(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.76, 12), cMat));
+    topBar.rotation.z = Math.PI / 2; topBar.position.set(d.x, 1.22, cz + 0.31);
+    const cLegM = mat(PAL.leg, { roughness: 0.32, metalness: 0.55 });
+    for (const [lx, lz, rz, rx] of [[-0.33, -0.29, -0.06, -0.05], [0.33, -0.29, 0.06, -0.05], [-0.33, 0.35, -0.06, 0.04], [0.33, 0.35, 0.06, 0.04]]) {
+      const l = add(new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.03, 0.6, 10), cLegM));
+      l.position.set(d.x + lx, 0.3, cz + lz); l.rotation.z = rz; l.rotation.x = rx; l.castShadow = true;
+    }
+    for (const lz of [-0.29, 0.35]) {   // stretcher rails low on the frame
+      const sb = add(new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.68, 8), cLegM));
+      sb.rotation.z = Math.PI / 2; sb.position.set(d.x, 0.11, cz + lz);
     }
   });
 
