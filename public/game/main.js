@@ -54,10 +54,12 @@ const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 90);
 // vertical fov is derived from the window shape so narrow windows and
 // phones don't collapse into a zoomed-in tunnel
 const DEG = Math.PI / 180;
-let fovKick = 0;   // sprinting widens the view a touch
+const BASE_FOVH = 100;   // fixed horizontal FOV — not user-adjustable (fair play)
+let fovKick = 0;         // sprinting widens the view a touch
+let zoom = 1, zoomTarget = 1;   // hold-to-zoom (Minecraft-style), 1 = normal
 function applyFov() {
-  const h = Math.min(150, profile.fovH + fovKick);
-  camera.fov = Math.max(45, Math.min(120, 2 * Math.atan(Math.tan(h * DEG / 2) / camera.aspect) / DEG));
+  const h = Math.min(150, (BASE_FOVH + fovKick) / zoom);
+  camera.fov = Math.max(14, Math.min(120, 2 * Math.atan(Math.tan(h * DEG / 2) / camera.aspect) / DEG));
   camera.updateProjectionMatrix();
 }
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; applyFov(); }
@@ -169,14 +171,8 @@ function refreshWho() {
     : 'Local mode: rooms work across TABS of this browser. Solo works everywhere.';
   $('soundBtn').onclick = () => ($('soundBtn').textContent = sfx.toggle() ? '🔇' : '🔊');
   // settings: username + color
-  $('setFov').oninput = () => {
-    profile.fovH = +$('setFov').value;
-    $('fovVal').textContent = profile.fovH;
-    applyFov();
-  };
   $('btnSettings').onclick = () => {
     $('setName').value = profile.name;
-    $('setFov').value = profile.fovH; $('fovVal').textContent = profile.fovH;
     const g = $('colorGrid'); g.innerHTML = '';
     for (const c of COLORS) {
       const d = document.createElement('div');
@@ -942,8 +938,9 @@ canvas.addEventListener('click', () => {
 document.addEventListener('pointerlockchange', () => { S.locked = document.pointerLockElement === canvas; });
 addEventListener('mousemove', e => {
   if (!S.locked) return;
-  S.yaw -= e.movementX * 0.0027;
-  S.pitch = Math.max(-1.35, Math.min(1.35, S.pitch - e.movementY * 0.0025));
+  const s = 0.0027 / zoom;   // zoomed in → slower, precise aim (scope feel)
+  S.yaw -= e.movementX * s;
+  S.pitch = Math.max(-1.35, Math.min(1.35, S.pitch - e.movementY * (0.0025 / zoom)));
 });
 // drag fallback when pointer lock is unavailable
 let dragXY = null;
@@ -1214,9 +1211,14 @@ function frame(nowMs) {
     S.me.walk = il ? 1 : 0;
     if (t > S.poseAt) { S.poseAt = t + 0.11; S.net.send('pose', { x: S.me.x, z: S.me.z, yaw: S.yaw, walk: S.me.walk }); }
   }
-  // sprint FOV kick eases in and out
-  const kick = S.sprinting ? 11 : 0;
-  if (Math.abs(fovKick - kick) > 0.2) { fovKick += (kick - fovKick) * Math.min(1, dt * 7); applyFov(); }
+  // hold-to-zoom (Minecraft spyglass style) + sprint FOV kick, both eased
+  const inRound = ['prep', 'inspect', 'exam'].includes(S.phase);
+  zoomTarget = (S.keys.KeyZ && inRound && !modalOpen()) ? 3.6 : 1;
+  const kick = S.sprinting && zoomTarget === 1 ? 11 : 0;   // no sprint-widen while scoping
+  let fovDirty = false;
+  if (Math.abs(zoom - zoomTarget) > 0.002) { zoom += (zoomTarget - zoom) * Math.min(1, dt * 12); fovDirty = true; }
+  if (Math.abs(fovKick - kick) > 0.2) { fovKick += (kick - fovKick) * Math.min(1, dt * 7); fovDirty = true; }
+  if (fovDirty) applyFov();
 
   // figures
   for (const p of (S.roster || [])) {
