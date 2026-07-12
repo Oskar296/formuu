@@ -33,4 +33,6 @@ export const profile = {
   set color(v) { if (COLORS.some(c => c.id === v)) { load().color = v; save(); } },
   get fovH() { return load().fovH; },
   set fovH(v) { v = Math.round(+v); if (v >= 70 && v <= 130) { load().fovH = v; save(); } },
+  get stats() { const p = load(); return { rounds: p.rounds | 0, wins: p.wins | 0 }; },
+  addRound(win) { const p = load(); p.rounds = (p.rounds | 0) + 1; if (win) p.wins = (p.wins | 0) + 1; save(); },
 };

@@ -57,7 +57,7 @@ const S = {
   traps: new Map(), notes: new Map(),   // notes: stuck under desks AND landed on desks
   items: new Map(),                     // rare cheat items spawned around the room
   standing: false, standingSet: {}, lastOOS: {}, hasMirror: false, hasCushion: false,
-  hasSmoke: false, hasPass: false, smokes: [], passUntil: {},
+  hasSmoke: false, hasPass: false, hasRoach: false, smokes: [], passUntil: {},
   attach: {}, myTrapUsed: false, myNoteUsed: false,
   me: { x: 4, z: 6, yaw: Math.PI, walk: 0 }, vx: 0, vz: 0, stun: 0, stuck: 0, keys: {},
   yaw: Math.PI, pitch: 0, locked: false,
@@ -93,7 +93,7 @@ $('viewerClose').onclick = () => $('viewer').classList.add('hidden');
 $('viewer').addEventListener('pointerup', e => { if (e.target.id === 'viewer') $('viewer').classList.add('hidden'); });
 $('help').addEventListener('pointerup', e => { if (e.target.id === 'help') $('help').classList.add('hidden'); });
 const show = (id, v) => $(id).classList.toggle('hidden', !v);
-const modalOpen = () => ['viewer', 'scrib', 'help', 'settings'].some(id => !$(id).classList.contains('hidden'));
+const modalOpen = () => ['viewer', 'scrib', 'help', 'settings', 'howto'].some(id => !$(id).classList.contains('hidden'));
 
 function sheetImage(name, answers) {
   const cv = document.createElement('canvas'); cv.width = 340; cv.height = 300;
@@ -114,6 +114,8 @@ function sheetImage(name, answers) {
 function refreshWho() {
   $('whoName').textContent = profile.name || 'no name yet';
   $('whoDot').style.background = colorHex(profile.color);
+  const st = profile.stats;
+  $('statLine').textContent = st.rounds ? `🎓 ${st.rounds} round${st.rounds > 1 ? 's' : ''} played · ${st.wins} won` : '';
 }
 {
   let role = 'student';
@@ -126,6 +128,15 @@ function refreshWho() {
     $('mapNote').textContent = S.mapSel === 'random' ? '🎲 random map each round'
       : `${MAPS[S.mapSel].icon} ${MAPS[S.mapSel].name}${MAPS[S.mapSel].items.includes('smoke') ? ' — exclusive: smoke vial' : MAPS[S.mapSel].items.includes('pass') ? ' — exclusive: hall pass' : ''}`;
   }));
+  S.diffSel = 'normal';
+  const DIFF_NOTE = { chill: '😴 substitute teacher — barely awake', normal: '🧑‍🏫 normal teacher', hawk: '🦅 hawk — sees EVERYTHING, students cheat sneakier' };
+  [...$('diffRow').children].forEach(b => (b.onclick = () => {
+    S.diffSel = b.dataset.diff;
+    [...$('diffRow').children].forEach(x => x.classList.toggle('sel', x === b));
+    $('diffNote').textContent = DIFF_NOTE[S.diffSel];
+  }));
+  $('btnHow').onclick = () => show('howto', true);
+  $('btnHowClose').onclick = () => show('howto', false);
   $('btnSolo').onclick = () => join('solo', role);
   $('btnCreate').onclick = () => join('create', role);
   $('btnJoin').onclick = () => join('join', role, $('codeInput').value.trim().toUpperCase());
@@ -218,7 +229,7 @@ function hostStart() {
   st.slice(0, 9).forEach((p, i) => (seats[p.id] = i));
   const ids = Object.keys(MAPS);
   const map = P.get('map') || (S.mapSel === 'random' || !MAPS[S.mapSel] ? ids[(Math.random() * ids.length) | 0] : S.mapSel);
-  S.net.send('start', { seed: +(P.get('seed') || (Math.random() * 1e9 | 0)), seats, teacherId: t[0].id, map });
+  S.net.send('start', { seed: +(P.get('seed') || (Math.random() * 1e9 | 0)), seats, teacherId: t[0].id, map, diff: S.diffSel || 'normal' });
 }
 function hostPhase(phase) {
   const endsAt = Date.now() + DUR[phase] / TSCALE * 1000;
@@ -410,14 +421,23 @@ function onEvent(ev) {
       scene.remove(it.mesh); S.items.delete(data.id);
       if (data.by === S.myId) {
         sfx.pickup();
-        if (it.kind === 'scrap') {   // instantly reveals one answer you don't have
+        if (it.kind === 'scrap' || it.kind === 'book') {
+          // scrap reveals one answer; the library's encyclopedia reveals TWO
           const mine = S.answers[S.myId] || [];
-          const missing = S.exam.questions.filter(q => mine[q.id] !== q.correct);
-          if (missing.length) {
+          const n = it.kind === 'book' ? 2 : 1;
+          let got = 0;
+          for (let k = 0; k < n; k++) {
+            const missing = S.exam.questions.filter(q => (S.answers[S.myId] || [])[q.id] !== q.correct);
+            if (!missing.length) break;
             const q = missing[(Math.random() * missing.length) | 0];
             setAnswer(q.id, q.correct);
-            toast(`📜 the scrap says: Q${q.id + 1} = ${LETTERS[q.correct]}!`, 'gold');
-          } else toast('📜 the scrap tells you nothing new');
+            toast(`${it.kind === 'book' ? '📖' : '📜'} ${it.kind === 'book' ? 'the encyclopedia reveals' : 'the scrap says'}: Q${q.id + 1} = ${LETTERS[q.correct]}!`, 'gold');
+            got++;
+          }
+          if (!got) toast(`${it.kind === 'book' ? '📖' : '📜'} tells you nothing new`);
+        } else if (it.kind === 'roach') {
+          S.hasRoach = true;
+          toast('🪳 a cockroach! release it near the teacher to send them running', 'gold');
         } else if (it.kind === 'mirror') {
           S.hasMirror = true;
           toast('🪞 mirror! peek at ANYONE\'s paper from your seat', 'gold');
@@ -445,6 +465,17 @@ function onEvent(ev) {
       S.passUntil[from] = now() + 12;
       gesture(from, '🎫 hall pass!', 'rgba(160,130,20,0.85)');
       if (from === S.myId) toast('🎫 hall pass active — 12 seconds of legal wandering', 'gold');
+      break;
+    }
+    case 'roach': {
+      sfx.sneeze(0.8);
+      gesture(from, '🪳 EEK!');
+      if (isTeacher()) {
+        // the teacher panics: jump back, blinded flails, can't accuse for a bit
+        S.stun = now() + 3.2; blind(1.0);
+        banner('🪳 A COCKROACH?! GET IT AWAY!', 3000);
+        S.lastAccuseAt = now() + 3;   // no accusing while flailing
+      } else banner(`🪳 ${nameOf(from)} let a cockroach loose on the teacher!`, 2600);
       break;
     }
     case 'accuse': if (S.net.isHost()) hostAccuse(from, data.target); break;
@@ -588,6 +619,7 @@ function handleVerdict(v) {
 // ---------------------------------------------------------------- round lifecycle
 function startRound(data) {
   S.seed = data.seed; S.seats = data.seats; S.teacherId = data.teacherId;
+  S.diff = data.diff || 'normal'; S.roundCounted = false; S.warned30 = false;
   if (room.mapId !== (data.map || 'classroom')) room = buildWorld(scene, data.map || 'classroom');
   S.exam = generateExam(data.seed);
   S.answers = {}; S.strikes = {}; S.expelled = {}; S.knowledge = {};
@@ -598,7 +630,7 @@ function startRound(data) {
   S.hotSel = -1; S.armedThrow = null; S.sheetOpen = true;
   S.standing = false; S.standingSet = {}; S.lastOOS = {};
   S.hasMirror = false; S.hasCushion = false; S.vx = 0; S.vz = 0;
-  S.hasSmoke = false; S.hasPass = false; S.passUntil = {};
+  S.hasSmoke = false; S.hasPass = false; S.hasRoach = false; S.passUntil = {};
   for (const pid in S.seats) S.answers[pid] = Array(N_QUESTIONS).fill(null);
   clearRound(false);
   bots.reset();
@@ -657,7 +689,7 @@ function setPhase(phase, endsAt) {
 
 // ---------------------------------------------------------------- world objects
 const TRAP_ICON = { marbles: '🔮', glue: '🍯', pepper: '🌶', clock: '⏰', cushion: '💨' };
-const ITEM_ICON = { mirror: '🪞', scrap: '📜', cushion: '💨', smoke: '🌫', pass: '🎫' };
+const ITEM_ICON = { mirror: '🪞', scrap: '📜', cushion: '💨', smoke: '🌫', pass: '🎫', book: '📖', roach: '🪳' };
 function trapMesh(kind, pos) {
   const g = new THREE.Group();
   const m = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, ...o });
@@ -707,6 +739,18 @@ function itemMesh(kind, pos) {
   } else if (kind === 'pass') {
     const card = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.14), m('#e8c84e', { side: THREE.DoubleSide, roughness: 0.6 }));
     card.rotation.x = -0.7; card.position.y = 0.3; g.add(card);
+  } else if (kind === 'book') {
+    const cover = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.3, 0.07), m('#7a3a34', { roughness: 0.7 }));
+    cover.position.y = 0.3; g.add(cover);
+    const pages = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.27, 0.06), m('#f2ead0'));
+    pages.position.set(0.01, 0.3, 0.005); g.add(pages);
+  } else if (kind === 'roach') {
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), m('#3a2a1a', { roughness: 0.6 }));
+    body.scale.set(1, 0.6, 1.5); body.position.y = 0.09; g.add(body);
+    for (const s of [-1, 1]) for (const zz of [-0.05, 0.03, 0.1]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.1, 5), m('#2a1a10'));
+      leg.position.set(s * 0.08, 0.05, zz); leg.rotation.z = s * 0.8; g.add(leg);
+    }
   } else {
     const b = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.06, 16), m('#d86a9a', { roughness: 0.7 }));
     b.position.y = 0.28; g.add(b);
@@ -1081,6 +1125,18 @@ function computePrompt() {
           });
         }
       }
+      // carrying the cockroach → release it near the teacher
+      if (!S.prompt && S.hasRoach && S.teacherId && S.teacherId !== S.myId) {
+        const tp = S.poses[S.teacherId];
+        if (tp && Math.hypot(tp.x - S.me.x, tp.z - S.me.z) < 3.5) {
+          const tf = S.figures[S.teacherId];
+          if (tf && ray.intersectObject(tf.mesh, true).length) {
+            set('🪳 CLICK — release the cockroach!', () => {
+              S.net.send('roach', { x: tp.x, z: tp.z }); S.hasRoach = false;
+            });
+          }
+        }
+      }
       // my bottle → rig / read
       if (!S.prompt) {
         const mine = room.bottleMeshes[seat];
@@ -1204,7 +1260,11 @@ function frame(nowMs) {
   if (['prep', 'inspect', 'exam'].includes(S.phase)) {
     const left = Math.max(0, (S.phaseEnds - Date.now()) / 1000);
     $('phaseTimer').textContent = `${(left / 60) | 0}:${String((left % 60) | 0).padStart(2, '0')}`;
-  } else $('phaseTimer').textContent = '–:––';
+    // last 30 seconds of the exam: pulse red + a one-time warning
+    const urgent = S.phase === 'exam' && left <= 30 && left > 0;
+    $('phaseTimer').classList.toggle('urgent', urgent);
+    if (urgent && !S.warned30) { S.warned30 = true; banner('⏰ 30 SECONDS LEFT — fill every answer!', 2600); sfx.bell(); }
+  } else { $('phaseTimer').textContent = '–:––'; $('phaseTimer').classList.remove('urgent'); }
   if (isTeacher()) {
     $('authFill').firstElementChild.style.width = S.authority + '%';
     $('inspFill').firstElementChild.style.width = S.inspection + '%';
@@ -1240,26 +1300,51 @@ function frame(nowMs) {
 requestAnimationFrame(frame);
 
 // ---------------------------------------------------------------- results
+let resultTimers = [];
 function showResults(data) {
   S.phase = 'results';
   sfx.stopRing();
   document.exitPointerLock && document.exitPointerLock();
+  ['viewer', 'scrib', 'help', 'howto'].forEach(i => show(i, false));   // clear any leftover popup
+  resultTimers.forEach(clearTimeout); resultTimers = [];
   const iWin = isTeacher() ? !data.pass : data.pass;
-  $('resultTitle').textContent = data.pass ? '🎉 THE CLASS PASSES!' : '💀 THE CLASS FAILS!';
-  $('avgLine').textContent =
-    (data.reason === 'principal' ? 'The principal fired the teacher! ' :
-     data.reason === 'expelled' ? 'Everyone got expelled! ' : '') +
-    `Class average: ${Math.round(data.avg * 100)}% (needed ${PASS * 100}%)`;
+  // count the round once, locally, for the menu stats line
+  if (!S.roundCounted) { S.roundCounted = true; profile.addRound(iWin); refreshWho(); }
+
+  // the ceremony builds suspense: title + rows reveal one-by-one on a drumroll,
+  // scores tick up, then the verdict lands
+  $('resultTitle').textContent = '📊 GRADING…';
+  $('resultTitle').style.color = '#ffd76a';
+  $('avgLine').textContent = 'The teacher is marking the papers…';
   const rows = $('resultsRows'); rows.innerHTML = '';
-  for (const r of data.rows) {
-    const d = document.createElement('div');
-    d.innerHTML = `<span>${r.crown ? '👑 ' : ''}${r.name}${r.id === S.myId ? ' (you)' : ''}</span>
-      <span class="val">${r.expelled ? 'EXPELLED' : Math.round(r.score / N_QUESTIONS * 100) + '%'}</span>`;
-    rows.appendChild(d);
-  }
-  (iWin ? sfx.win : sfx.lose).call(sfx);
   ['sheet', 'teachBar', 'hotbar', 'crosshair', 'prompt', 'helpTip'].forEach(i => show(i, false));
   show('results', true);
+
+  const list = data.rows;
+  list.forEach((r, i) => {
+    const d = document.createElement('div');
+    d.style.opacity = 0; d.style.transition = 'opacity .3s, transform .3s'; d.style.transform = 'translateY(8px)';
+    d.innerHTML = `<span>${r.crown ? '👑 ' : ''}${r.name}${r.id === S.myId ? ' (you)' : ''}</span>
+      <span class="val">…</span>`;
+    rows.appendChild(d);
+    resultTimers.push(setTimeout(() => {
+      d.style.opacity = 1; d.style.transform = 'none';
+      d.querySelector('.val').textContent = r.expelled ? 'EXPELLED' : Math.round(r.score / N_QUESTIONS * 100) + '%';
+      sfx.tap(0.8);
+      if (r.crown) sfx.learn();
+    }, 500 + i * 500));
+  });
+
+  // final verdict after every paper is shown
+  resultTimers.push(setTimeout(() => {
+    $('resultTitle').textContent = data.pass ? '🎉 THE CLASS PASSES!' : '💀 THE CLASS FAILS!';
+    $('resultTitle').style.color = data.pass ? '#8fd39e' : '#e07a6a';
+    $('avgLine').textContent =
+      (data.reason === 'principal' ? 'The principal fired the teacher! ' :
+       data.reason === 'expelled' ? 'Everyone got expelled! ' : '') +
+      `Class average: ${Math.round(data.avg * 100)}% (needed ${PASS * 100}%)`;
+    (iWin ? sfx.win : sfx.lose).call(sfx);
+  }, 600 + list.length * 500));
 }
 
 // ---------------------------------------------------------------- boot + test hooks
@@ -1274,7 +1359,8 @@ window.__game = {
       authority: S.authority, inspection: S.inspection, traps: S.traps.size, notes: S.notes.size,
       prompt: S.prompt && S.prompt.text, isHost: S.net ? S.net.isHost() : false, country: S.exam && S.exam.country,
       standing: S.standing, items: S.items.size, hasMirror: S.hasMirror, hasCushion: S.hasCushion,
-      hasSmoke: S.hasSmoke, hasPass: S.hasPass, smokes: S.smokes.length, map: room.mapId };
+      hasSmoke: S.hasSmoke, hasPass: S.hasPass, hasRoach: S.hasRoach, smokes: S.smokes.length,
+      map: room.mapId, diff: S.diff };
   },
   skipPhase() { if (S.net && S.net.isHost()) S.phaseEnds = 0; },
   look(yaw, pitch) { S.yaw = yaw; S.pitch = pitch || 0; },

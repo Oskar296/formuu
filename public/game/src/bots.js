@@ -159,16 +159,18 @@ export class BotBrain {
       tb.yaw = Math.atan2(dx, dz) + Math.PI;
     }
     this.pose(p, tb, now, dist > 0.1 ? 1 : 0);
-    // accuse: any student with a live cheat in the log, close by, cooldown gated
+    // accuse: any student with a live cheat in the log, close by, cooldown gated.
+    // Difficulty scales the eyesight range and the odds of pouncing.
+    const D = { chill: { r: 2.6, p: 0.28 }, normal: { r: 3.4, p: 0.55 }, hawk: { r: 5.2, p: 0.9 } }[S.diff || 'normal'];
     if (S.phase === 'exam' && now - S.lastAccuseAt >= S.ACCUSE_CD) {
       for (const q of S.roster) {
         if (q.role !== 'student' || S.expelled[q.id]) continue;
         const seat = S.seats[q.id]; if (seat == null) continue;
         // wanderers are judged where they actually ARE, not at their desk
         const loc = (S.standingSet[q.id] && (q.id === S.myId ? S.me : S.poses[q.id])) || DESKS[seat];
-        if (Math.hypot(tb.x - loc.x, tb.z - loc.z) > 3.4) continue;
+        if (Math.hypot(tb.x - loc.x, tb.z - loc.z) > D.r) continue;
         const hit = S.cheatLog.some(a => a.pid === q.id && a.until >= now && !a.riot);
-        if (hit && Math.random() < 0.55) { this.net.sendAs(p.id, 'accuse', { target: q.id }); break; }
+        if (hit && Math.random() < D.p) { this.net.sendAs(p.id, 'accuse', { target: q.id }); break; }
       }
     }
   }

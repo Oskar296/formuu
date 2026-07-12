@@ -1,14 +1,17 @@
 import * as THREE from 'three';
 
-// The world: three exam rooms sharing one skeleton (desks facing a board at
-// -z, teacher desk + phone up front, shame stool in a corner) but with their
-// own layout, look, and EXCLUSIVE cheat-item pools. Layout state (DESKS, ROOM,
-// …) is mutated in place on build so every module reads fresh coordinates.
+// The world: five exam rooms sharing one skeleton (desks facing a board at
+// -z, teacher desk + phone up front, shame stool in a corner) but each with
+// its own layout, palette, lighting mood, props, and EXCLUSIVE cheat items.
+// Layout state (DESKS, ROOM, …) is mutated in place on build so every module
+// reads fresh coordinates.
 
 export const MAPS = {
   classroom: { name: 'Classroom', icon: '🏫', items: ['mirror', 'scrap', 'cushion'] },
   lab: { name: 'Science Lab', icon: '🧪', items: ['smoke', 'scrap', 'mirror'] },
   gym: { name: 'Gym Hall', icon: '🏀', items: ['pass', 'cushion', 'scrap'] },
+  library: { name: 'Library', icon: '📚', items: ['book', 'mirror', 'scrap'] },
+  detention: { name: 'Night Detention', icon: '🌙', items: ['roach', 'smoke', 'scrap'] },
 };
 
 export const DESKS = [];                       // seat positions (chair center), facing -z
@@ -24,11 +27,13 @@ export const seatAdjacent = (a, b) => {
 const OBS = [];
 function layout(mapId) {
   DESKS.length = 0;
-  if (mapId === 'lab') { ROOM.x = 8.6; ROOM.z = 7.6; }
-  else if (mapId === 'gym') { ROOM.x = 10.2; ROOM.z = 10.2; }
-  else { ROOM.x = 7.2; ROOM.z = 8.4; }
-  const sx = mapId === 'gym' ? 4.1 : mapId === 'lab' ? 3.5 : 3.0;
-  const sz = mapId === 'gym' ? 3.5 : mapId === 'lab' ? 2.7 : 2.9;
+  const dims = {
+    classroom: [7.2, 8.4], lab: [8.6, 7.6], gym: [10.2, 10.2],
+    library: [8.2, 8.8], detention: [6.6, 7.8],
+  }[mapId];
+  ROOM.x = dims[0]; ROOM.z = dims[1];
+  const sx = { classroom: 3.0, lab: 3.5, gym: 4.1, library: 3.1, detention: 2.7 }[mapId];
+  const sz = { classroom: 2.9, lab: 2.7, gym: 3.5, library: 2.9, detention: 2.5 }[mapId];
   const z0 = mapId === 'gym' ? -2.4 : -1.6;
   for (let r = 0; r < 3; r++)
     for (let c = 0; c < 3; c++) {
@@ -45,7 +50,11 @@ function layout(mapId) {
     OBS.push({ x: d.x, z: d.z + 0.2, hx: 0.44, hz: 0.42 });  // chair
   }
   OBS.push({ x: TEACHER_DESK.x, z: TEACHER_DESK.z, hx: 1.3, hz: 0.55 });
-  if (mapId === 'gym') OBS.push({ x: ROOM.x + 0.1, z: 0, hx: 1.2, hz: ROOM.z });  // bleachers
+  if (mapId === 'gym') OBS.push({ x: ROOM.x + 0.1, z: 0, hx: 1.2, hz: ROOM.z });          // bleachers
+  if (mapId === 'library') {
+    OBS.push({ x: -ROOM.x + 0.35, z: 0, hx: 0.45, hz: ROOM.z });                          // shelf walls
+    OBS.push({ x: ROOM.x - 0.35, z: 0, hx: 0.45, hz: ROOM.z });
+  }
 }
 
 const mat = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, ...o });
@@ -59,9 +68,9 @@ function tex(w, h, draw, repeat) {
   return t;
 }
 
-const plankTex = () => tex(512, 512, (c, w) => {
+const plankTex = (base = 148, spread = 22) => tex(512, 512, (c, w) => {
   for (let y = 0; y < 8; y++) {
-    const b = 148 + Math.random() * 22;
+    const b = base + Math.random() * spread;
     c.fillStyle = `rgb(${b + 24},${b - 18},${b - 58})`; c.fillRect(0, y * 64, w, 64);
     c.strokeStyle = 'rgba(70,45,22,0.4)'; c.lineWidth = 2; c.strokeRect(0, y * 64, w, 64);
     for (let g = 0; g < 5; g++) {
@@ -81,7 +90,7 @@ const tileTex = () => tex(512, 512, (c) => {
   }
 }, [5, 5]);
 
-const courtTex = (rx, rz) => tex(1024, 1024, (c, w, h) => {
+const courtTex = () => tex(1024, 1024, (c, w, h) => {
   for (let y = 0; y < 16; y++) {
     const b = 176 + Math.random() * 16;
     c.fillStyle = `rgb(${b + 30},${b - 6},${b - 52})`; c.fillRect(0, y * 64, w, 64);
@@ -95,6 +104,56 @@ const courtTex = (rx, rz) => tex(1024, 1024, (c, w, h) => {
   c.beginPath(); c.arc(w / 2, 74, 190, 0, Math.PI); c.stroke();
 });
 
+const carpetTex = () => tex(512, 512, (c, w, h) => {
+  c.fillStyle = '#7a3f3a'; c.fillRect(0, 0, w, h);
+  for (let i = 0; i < 5200; i++) {
+    c.fillStyle = `rgba(${90 + Math.random() * 60},${40 + Math.random() * 26},${36 + Math.random() * 22},0.5)`;
+    c.fillRect(Math.random() * w, Math.random() * h, 2.2, 2.2);
+  }
+  c.strokeStyle = 'rgba(220,190,140,0.28)'; c.lineWidth = 5;
+  c.strokeRect(38, 38, w - 76, h - 76);
+}, [3, 3]);
+
+const bookRowTex = () => tex(512, 256, (c, w, h) => {
+  c.fillStyle = '#2c1f14'; c.fillRect(0, 0, w, h);
+  const cols = ['#8a3a34', '#3a5a8a', '#3f7a4c', '#b08a3a', '#6a4a8a', '#a05a2a', '#4a7a7a'];
+  let x = 4;
+  while (x < w - 10) {
+    const bw = 14 + Math.random() * 22, bh = h * (0.72 + Math.random() * 0.24);
+    c.fillStyle = cols[(Math.random() * cols.length) | 0];
+    c.fillRect(x, h - bh, bw, bh);
+    c.fillStyle = 'rgba(0,0,0,0.25)'; c.fillRect(x + bw - 3, h - bh, 3, bh);
+    if (Math.random() < 0.3) { c.fillStyle = 'rgba(255,240,200,0.5)'; c.fillRect(x + 3, h - bh + 8, bw - 8, 3); }
+    x += bw + 2;
+  }
+});
+
+// ambience per map: sky/fog + light rig settings, applied on every build
+const AMB = {
+  classroom: { bg: '#cfd8e4', sun: 1.7, sunCol: '#ffeccf', hemi: 0.85, amb: 0.4, panel: '#fdfdf2' },
+  lab: { bg: '#d4dde2', sun: 1.45, sunCol: '#eef4ff', hemi: 1.0, amb: 0.48, panel: '#f2fbff' },
+  gym: { bg: '#d8d8ca', sun: 1.6, sunCol: '#fff2d8', hemi: 0.9, amb: 0.42, panel: '#fdfae8' },
+  library: { bg: '#c9c0ad', sun: 1.1, sunCol: '#ffdfa8', hemi: 0.66, amb: 0.36, panel: '#f6e8c8' },
+  detention: { bg: '#1c2130', sun: 0.35, sunCol: '#9ab0e8', hemi: 0.28, amb: 0.2, panel: '#5a6478' },
+};
+
+let LIGHTS = null;
+export function lights(scene) {
+  const hemi = new THREE.HemisphereLight('#f2ecff', '#5c5044', 0.85);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight('#ffeccf', 1.7);
+  sun.position.set(-9, 9, 3);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -13; sun.shadow.camera.right = 13;
+  sun.shadow.camera.top = 12; sun.shadow.camera.bottom = -13;
+  sun.shadow.camera.far = 45; sun.shadow.bias = -0.0004;
+  scene.add(sun);
+  const amb = new THREE.AmbientLight('#b8c0d4', 0.4);
+  scene.add(amb);
+  LIGHTS = { hemi, sun, amb };
+}
+
 let worldGroup = null;
 
 export function buildWorld(scene, mapId = 'classroom') {
@@ -105,43 +164,75 @@ export function buildWorld(scene, mapId = 'classroom') {
   const add = o => { G.add(o); return o; };
   const surfaces = [], paperMeshes = [], bottleMeshes = [];
   const H = mapId === 'gym' ? 6.2 : 4.6;
+  const night = mapId === 'detention';
   const PAL = {
-    classroom: { wallTop: '#e7e2d2', wallBot: '#a8c4bc', deskTop: '#a9713f', chair: '#b5643c', leg: '#8a8f98' },
-    lab: { wallTop: '#eef2f4', wallBot: '#b8c8cc', deskTop: '#4a5560', chair: '#5a6570', leg: '#3a4048' },
-    gym: { wallTop: '#d8d4c4', wallBot: '#9a8f6a', deskTop: '#8a8f98', chair: '#7a6f52', leg: '#6a6f78' },
+    classroom: { wallTop: '#e7e2d2', wallBot: '#a8c4bc', deskTop: '#a9713f', chair: '#b5643c', leg: '#8a8f98', rail: '#8a6a42' },
+    lab: { wallTop: '#eef2f4', wallBot: '#b8c8cc', deskTop: '#4a5560', chair: '#5a6570', leg: '#3a4048', rail: '#7a868c' },
+    gym: { wallTop: '#d8d4c4', wallBot: '#9a8f6a', deskTop: '#8a8f98', chair: '#7a6f52', leg: '#6a6f78', rail: '#8a6a42' },
+    library: { wallTop: '#d9cdb4', wallBot: '#7a5a3c', deskTop: '#6e4a28', chair: '#7d3f34', leg: '#4a3a28', rail: '#5a4228' },
+    detention: { wallTop: '#3c4252', wallBot: '#2c3140', deskTop: '#5a4c3c', chair: '#4a4238', leg: '#3a3f48', rail: '#2a2f3a' },
   }[mapId];
 
+  // ambience: sky, fog and the light rig take on the map's mood
+  const A = AMB[mapId];
+  scene.background = new THREE.Color(A.bg);
+  scene.fog = new THREE.Fog(A.bg, night ? 16 : 24, night ? 38 : 46);
+  if (LIGHTS) {
+    LIGHTS.sun.intensity = A.sun; LIGHTS.sun.color.set(A.sunCol);
+    LIGHTS.hemi.intensity = A.hemi;
+    LIGHTS.amb.intensity = A.amb;
+  }
+  if (night) {
+    // a warm desk lamp at the teacher's post and a cold moon wash
+    const lamp = new THREE.PointLight('#ffb45a', 22, 12, 1.8);
+    lamp.position.set(TEACHER_DESK.x + 0.9, 1.5, TEACHER_DESK.z + 0.2);
+    add(lamp);
+    const moon = new THREE.PointLight('#7a96d8', 14, 18, 1.6);
+    moon.position.set(-ROOM.x + 1, 3.4, 0);
+    add(moon);
+  }
+
   // floor
-  const floorMap = mapId === 'lab' ? tileTex() : mapId === 'gym' ? courtTex() : plankTex();
+  const floorMap = { classroom: plankTex(), lab: tileTex(), gym: courtTex(), library: carpetTex(), detention: plankTex(96, 14) }[mapId];
   const floor = add(new THREE.Mesh(new THREE.PlaneGeometry(ROOM.x * 2 + 1, ROOM.z * 2 + 1),
     new THREE.MeshStandardMaterial({ map: floorMap, roughness: 0.8 })));
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
 
-  // walls + rail + ceiling
-  const wallTop = mat(PAL.wallTop), wallBot = mat(PAL.wallBot);
+  // walls + rail + baseboard + ceiling
+  const wallTop = mat(PAL.wallTop), wallBot = mat(PAL.wallBot), base = mat('#4a4038', { roughness: 0.6 });
   const mkWall = (w, x, z, ry) => {
     const top = add(new THREE.Mesh(new THREE.PlaneGeometry(w, H - 1.4), wallTop));
     top.position.set(x, 1.4 + (H - 1.4) / 2, z); top.rotation.y = ry;
     const bot = add(new THREE.Mesh(new THREE.PlaneGeometry(w, 1.4), wallBot));
     bot.position.set(x, 0.7, z); bot.rotation.y = ry;
     const along = ry === 0 || Math.abs(ry) === Math.PI;
-    const rail = add(new THREE.Mesh(new THREE.BoxGeometry(along ? w : 0.06, 0.08, along ? 0.06 : w), mat('#8a6a42', { roughness: 0.6 })));
+    const rail = add(new THREE.Mesh(new THREE.BoxGeometry(along ? w : 0.06, 0.08, along ? 0.06 : w), mat(PAL.rail, { roughness: 0.6 })));
     rail.position.set(x, 1.42, z);
+    const bb = add(new THREE.Mesh(new THREE.BoxGeometry(along ? w : 0.07, 0.14, along ? 0.07 : w), base));
+    bb.position.set(x, 0.07, z);
   };
   mkWall(ROOM.x * 2 + 1, 0, -ROOM.z - 0.5, 0);
   mkWall(ROOM.x * 2 + 1, 0, ROOM.z + 0.5, Math.PI);
   mkWall(ROOM.z * 2 + 1, -ROOM.x - 0.5, 0, Math.PI / 2);
   mkWall(ROOM.z * 2 + 1, ROOM.x + 0.5, 0, -Math.PI / 2);
-  const ceil = add(new THREE.Mesh(new THREE.PlaneGeometry(ROOM.x * 2 + 1, ROOM.z * 2 + 1), mat('#f2f0e8')));
+  const ceil = add(new THREE.Mesh(new THREE.PlaneGeometry(ROOM.x * 2 + 1, ROOM.z * 2 + 1), mat(night ? '#262b38' : '#f2f0e8')));
   ceil.rotation.x = Math.PI / 2; ceil.position.y = H;
 
+  // glowing ceiling light panels (dim, greenish in detention)
+  for (const px of [-ROOM.x * 0.45, ROOM.x * 0.45]) for (const pz of [-ROOM.z * 0.42, ROOM.z * 0.42]) {
+    const panel = add(new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.06, 0.9), new THREE.MeshBasicMaterial({ color: A.panel })));
+    panel.position.set(px, H - 0.05, pz);
+    const rim = add(new THREE.Mesh(new THREE.BoxGeometry(2.14, 0.05, 1.04), mat('#9aa0aa')));
+    rim.position.set(px, H - 0.02, pz);
+  }
+
   // the exam board
-  const boardTitle = mapId === 'lab' ? 'LAB FINAL' : mapId === 'gym' ? 'PE THEORY EXAM' : 'FINAL EXAM';
+  const boardTitle = { classroom: 'FINAL EXAM', lab: 'LAB FINAL', gym: 'PE THEORY EXAM', library: 'LIBRARY QUIZ', detention: 'DETENTION EXAM' }[mapId];
   const white = mapId === 'lab';
   const board = add(new THREE.Mesh(new THREE.PlaneGeometry(6.4, 2.3), new THREE.MeshStandardMaterial({
     map: tex(1024, 384, (c, w, h) => {
-      c.fillStyle = white ? '#f2f6f6' : '#2b4433'; c.fillRect(0, 0, w, h);
+      c.fillStyle = white ? '#f2f6f6' : night ? '#20301f' : '#2b4433'; c.fillRect(0, 0, w, h);
       c.fillStyle = white ? '#2b4a8c' : 'rgba(240,240,220,0.92)'; c.font = 'bold 66px Georgia';
       c.fillText(boardTitle, 56, 100);
       c.font = '40px Georgia'; c.globalAlpha = 0.85;
@@ -160,26 +251,45 @@ export function buildWorld(scene, mapId = 'classroom') {
   const chalkTray = add(new THREE.Mesh(new THREE.BoxGeometry(6.6, 0.06, 0.18), frame));
   chalkTray.position.set(BOARD.x, 0.9, -ROOM.z - 0.36);
 
-  // windows on the left wall (higher, smaller in the gym)
-  const wy = mapId === 'gym' ? 3.9 : 2.3, wh = mapId === 'gym' ? 1.3 : 1.9;
-  for (const wz of [-ROOM.z * 0.5, 0.1 * ROOM.z, ROOM.z * 0.64]) {
-    const glass = add(new THREE.Mesh(new THREE.PlaneGeometry(2.4, wh), new THREE.MeshBasicMaterial({
-      map: tex(256, 256, (c) => {
-        const g2 = c.createLinearGradient(0, 0, 0, 256);
-        g2.addColorStop(0, '#9cc2ec'); g2.addColorStop(0.65, '#d5e6f6'); g2.addColorStop(1, '#eef4da');
-        c.fillStyle = g2; c.fillRect(0, 0, 256, 256);
-        c.fillStyle = 'rgba(255,255,255,0.9)';
-        for (const [x2, y2, r2] of [[70, 70, 24], [104, 80, 30], [180, 56, 20]]) { c.beginPath(); c.arc(x2, y2, r2, 0, 7); c.fill(); }
-        c.fillStyle = '#8fbf6a'; c.fillRect(0, 214, 256, 42);
-      }),
-    })));
-    glass.rotation.y = Math.PI / 2;
-    glass.position.set(-ROOM.x - 0.44, wy, wz);
-    const fm = mat('#e8e4d8', { roughness: 0.5 });
-    const v = add(new THREE.Mesh(new THREE.BoxGeometry(0.06, wh + 0.1, 0.09), fm));
-    v.position.set(-ROOM.x - 0.4, wy, wz);
-    const hh = add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.09, 2.5), fm));
-    hh.position.set(-ROOM.x - 0.4, wy, wz);
+  // windows on the left wall (skip in the library — shelves live there;
+  // in detention they show the night sky and one is boarded up)
+  if (mapId !== 'library') {
+    const wy = mapId === 'gym' ? 3.9 : 2.3, wh = mapId === 'gym' ? 1.3 : 1.9;
+    const winList = [-ROOM.z * 0.5, 0.1 * ROOM.z, ROOM.z * 0.64];
+    winList.forEach((wz, wi) => {
+      const glass = add(new THREE.Mesh(new THREE.PlaneGeometry(2.4, wh), new THREE.MeshBasicMaterial({
+        map: tex(256, 256, (c) => {
+          if (night) {
+            const g2 = c.createLinearGradient(0, 0, 0, 256);
+            g2.addColorStop(0, '#0c1226'); g2.addColorStop(1, '#1c2a4a');
+            c.fillStyle = g2; c.fillRect(0, 0, 256, 256);
+            c.fillStyle = '#e8ecf4'; c.beginPath(); c.arc(190, 62, 26, 0, 7); c.fill();
+            c.fillStyle = '#0c1226'; c.beginPath(); c.arc(200, 54, 22, 0, 7); c.fill();
+            c.fillStyle = 'rgba(255,255,255,0.85)';
+            for (let i = 0; i < 40; i++) c.fillRect(Math.random() * 256, Math.random() * 256, 1.6, 1.6);
+          } else {
+            const g2 = c.createLinearGradient(0, 0, 0, 256);
+            g2.addColorStop(0, '#9cc2ec'); g2.addColorStop(0.65, '#d5e6f6'); g2.addColorStop(1, '#eef4da');
+            c.fillStyle = g2; c.fillRect(0, 0, 256, 256);
+            c.fillStyle = 'rgba(255,255,255,0.9)';
+            for (const [x2, y2, r2] of [[70, 70, 24], [104, 80, 30], [180, 56, 20]]) { c.beginPath(); c.arc(x2, y2, r2, 0, 7); c.fill(); }
+            c.fillStyle = '#8fbf6a'; c.fillRect(0, 214, 256, 42);
+          }
+        }),
+      })));
+      glass.rotation.y = Math.PI / 2;
+      glass.position.set(-ROOM.x - 0.44, wy, wz);
+      const fm = mat(night ? '#4a5060' : '#e8e4d8', { roughness: 0.5 });
+      const v = add(new THREE.Mesh(new THREE.BoxGeometry(0.06, wh + 0.1, 0.09), fm));
+      v.position.set(-ROOM.x - 0.4, wy, wz);
+      const hh = add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.09, 2.5), fm));
+      hh.position.set(-ROOM.x - 0.4, wy, wz);
+      if (night && wi === 2) for (const rot of [0.5, -0.4]) {  // boarded-up window
+        const plank = add(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.24, 2.6), mat('#5a4632', { roughness: 0.9 })));
+        plank.position.set(-ROOM.x - 0.36, wy, wz);
+        plank.rotation.x = rot;
+      }
+    });
   }
 
   // posters / decorations
@@ -193,12 +303,35 @@ export function buildWorld(scene, mapId = 'classroom') {
     c.fillStyle = '#fff'; c.font = 'bold 40px system-ui'; c.textAlign = 'center';
     txt.split('\n').forEach((l, i) => c.fillText(l, w / 2, h / 2 - 20 + i * 52));
   };
+
   if (mapId === 'classroom') {
     poster(txtPoster('STUDY\nHARD', '#4e8a5e'), ROOM.x + 0.44, -3, -Math.PI / 2);
     poster(txtPoster('NO\nEXCUSES', '#b9553e'), ROOM.x + 0.44, 1.5, -Math.PI / 2);
     poster(txtPoster('SILENCE', '#46608a'), -4.5, -ROOM.z - 0.44, 0);
+    // bookshelf, globe, plant, backpacks
+    const shelf = add(new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.1, 0.5), mat('#6e4a28', { roughness: 0.7 })));
+    shelf.position.set(4.6, 1.05, ROOM.z + 0.22); shelf.castShadow = true;
+    for (let s = 0; s < 3; s++) {
+      const row = add(new THREE.Mesh(new THREE.PlaneGeometry(2.2, 0.52),
+        new THREE.MeshStandardMaterial({ map: bookRowTex(), roughness: 0.9 })));
+      row.position.set(4.6, 0.55 + s * 0.62, ROOM.z - 0.045); row.rotation.y = Math.PI;
+    }
+    const globe = add(new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 12), mat('#4a7ac0', { roughness: 0.4 })));
+    globe.position.set(TEACHER_DESK.x - 0.85, 1.18, TEACHER_DESK.z);
+    const pot = add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.16, 0.34, 12), mat('#a05a32')));
+    pot.position.set(-ROOM.x + 0.6, 0.17, ROOM.z - 0.5);
+    for (let i = 0; i < 5; i++) {
+      const leaf = add(new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.7, 7), mat('#3f7a44', { roughness: 0.7 })));
+      const a = i / 5 * Math.PI * 2;
+      leaf.position.set(-ROOM.x + 0.6 + Math.cos(a) * 0.1, 0.68, ROOM.z - 0.5 + Math.sin(a) * 0.1);
+      leaf.rotation.z = Math.cos(a) * 0.5; leaf.rotation.x = -Math.sin(a) * 0.5;
+    }
+    [[1, '#b9553e'], [4, '#46608a'], [7, '#4e8a5e']].forEach(([i, col]) => {
+      const d = DESKS[i];
+      const bp = add(new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.2, 4, 10), mat(col, { roughness: 0.8 })));
+      bp.position.set(d.x + 0.75, 0.26, d.z + 0.5); bp.rotation.z = 0.35; bp.castShadow = true;
+    });
   } else if (mapId === 'lab') {
-    // periodic table of made-up elements
     poster((c, w, h) => {
       c.fillStyle = '#f4f1e6'; c.fillRect(0, 0, w, h);
       const cols = ['#c05050', '#5080c0', '#50a070', '#c0a050', '#9060b0'];
@@ -209,7 +342,13 @@ export function buildWorld(scene, mapId = 'classroom') {
       c.fillText('ELEMENTS', w / 2, 20);
     }, ROOM.x + 0.44, -2, -Math.PI / 2, 1.6, 1.4);
     poster(txtPoster('SAFETY\nFIRST', '#c07030'), -4.2, -ROOM.z - 0.44, 0);
-    // wall shelf with flasks
+    // cabinets along the back wall + wall shelf with flasks
+    for (const cx of [-4.4, -1.8, 0.8, 3.4]) {
+      const cab = add(new THREE.Mesh(new THREE.BoxGeometry(2.3, 1.0, 0.55), mat('#8a949c', { roughness: 0.5 })));
+      cab.position.set(cx, 0.5, ROOM.z + 0.2); cab.castShadow = true;
+      const hdl = add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.05), mat('#3a4048')));
+      hdl.position.set(cx, 0.62, ROOM.z - 0.09);
+    }
     const shelf = add(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.05, 4.4), mat('#7a5a38')));
     shelf.position.set(ROOM.x + 0.35, 1.9, 2.6);
     for (let i = 0; i < 6; i++) {
@@ -217,16 +356,37 @@ export function buildWorld(scene, mapId = 'classroom') {
         mat(['#5aa3d8', '#c05a8a', '#5ac07a', '#d8b04e'][i % 4], { roughness: 0.25, transparent: true, opacity: 0.85 })));
       f.position.set(ROOM.x + 0.35, 2.03, 0.9 + i * 0.72);
     }
-  } else {
+    // hazard stripe strip under the board
+    poster((c, w, h) => {
+      for (let i = -2; i < 10; i++) {
+        c.fillStyle = i % 2 ? '#e8c020' : '#232323';
+        c.beginPath(); c.moveTo(i * 30, 0); c.lineTo(i * 30 + 30, 0); c.lineTo(i * 30 + 10, h); c.lineTo(i * 30 - 20, h); c.fill();
+      }
+    }, BOARD.x, -ROOM.z - 0.43, 0, 6.6, 0.28, 0.68);
+  } else if (mapId === 'gym') {
     poster(txtPoster('GO\nTEAM', '#b9553e'), -4.5, -ROOM.z - 0.44, 0, 1.3, 1.7, 3.4);
+    // scoreboard
+    poster((c, w, h) => {
+      c.fillStyle = '#1a1e28'; c.fillRect(0, 0, w, h);
+      c.fillStyle = '#e8c020'; c.font = 'bold 30px monospace'; c.textAlign = 'center';
+      c.fillText('HOME 42', w / 2, 44);
+      c.fillStyle = '#e05a4a'; c.fillText('GUEST 7', w / 2, 86);
+      c.strokeStyle = '#4a5060'; c.lineWidth = 6; c.strokeRect(4, 4, w - 8, h - 8);
+    }, 4.2, -ROOM.z - 0.42, 0, 2.2, 1.1, 4.2);
+    // hanging banners
+    [['#b9553e', 'EXAM CUP'], ['#46608a', 'DIV 1'], ['#4e8a5e', 'CHAMPS']].forEach(([col, txt], i) => {
+      poster((c, w, h) => {
+        c.fillStyle = col; c.beginPath(); c.moveTo(0, 0); c.lineTo(w, 0); c.lineTo(w, h * 0.72); c.lineTo(w / 2, h); c.lineTo(0, h * 0.72); c.fill();
+        c.fillStyle = '#fff'; c.font = 'bold 26px system-ui'; c.textAlign = 'center'; c.fillText(txt, w / 2, 44);
+      }, -6 + i * 3.2, ROOM.z + 0.42, Math.PI, 1.1, 1.5, 4.6);
+    });
     // bleachers along the right wall
     for (let s = 0; s < 3; s++) {
       const step = add(new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.42, ROOM.z * 2 - 3), mat('#8a6a42', { roughness: 0.7 })));
-      step.position.set(ROOM.x - 0.45 + s * 0.0, 0.21 + s * 0.42, 0);
-      step.position.x = ROOM.x - 1.35 + s * 0.45;
+      step.position.set(ROOM.x - 1.35 + s * 0.45, 0.21 + s * 0.42, 0);
       step.castShadow = step.receiveShadow = true;
     }
-    // basketball hoop on the back wall
+    // basketball hoop + cones
     const pole = add(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3.9, 10), mat('#5a6068', { roughness: 0.4 })));
     pole.position.set(-ROOM.x + 1.2, 1.95, ROOM.z + 0.2);
     const back = add(new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.9, 0.06), mat('#e8e8e0', { roughness: 0.5 })));
@@ -234,9 +394,63 @@ export function buildWorld(scene, mapId = 'classroom') {
     const ring = add(new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.03, 8, 20), mat('#c05a30', { roughness: 0.4 })));
     ring.rotation.x = Math.PI / 2;
     ring.position.set(-ROOM.x + 1.2, 3.55, ROOM.z - 0.25);
+    for (let i = 0; i < 3; i++) {
+      const cone = add(new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.36, 10), mat('#e07030', { roughness: 0.6 })));
+      cone.position.set(-ROOM.x + 1.4 + i * 0.5, 0.18, -ROOM.z + 1.2);
+      cone.castShadow = true;
+    }
+  } else if (mapId === 'library') {
+    poster(txtPoster('SHHH!', '#46608a'), -4.2, -ROOM.z - 0.44, 0);
+    poster(txtPoster('READ\nMORE', '#4e8a5e'), 4.2, ROOM.z + 0.44, Math.PI);
+    // tall shelf walls down both sides, stuffed with books
+    for (const side of [-1, 1]) {
+      for (let s = 0; s < 4; s++) {
+        const zc = -ROOM.z + 2.2 + s * ((ROOM.z * 2 - 4.4) / 3);
+        const case_ = add(new THREE.Mesh(new THREE.BoxGeometry(0.85, 2.6, 3.2), mat('#5a4228', { roughness: 0.7 })));
+        case_.position.set(side * (ROOM.x - 0.35), 1.3, zc);
+        case_.castShadow = case_.receiveShadow = true;
+        for (let r = 0; r < 4; r++) {
+          const row = add(new THREE.Mesh(new THREE.PlaneGeometry(3.0, 0.5),
+            new THREE.MeshStandardMaterial({ map: bookRowTex(), roughness: 0.9 })));
+          row.position.set(side * (ROOM.x - 0.35 - side * 0.44), 0.5 + r * 0.6, zc);
+          row.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+        }
+      }
+    }
+    // reading lamps on the desks (warm dot of light, no perf cost)
+    DESKS.forEach(d => {
+      const armM = mat('#2a5a3a', { roughness: 0.4, metalness: 0.3 });
+      const stem = add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.025, 0.24, 8), armM));
+      stem.position.set(d.x - 0.62, 1.22, d.deskZ + 0.28);
+      const shade = add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.11, 0.1, 10, 1, true),
+        new THREE.MeshStandardMaterial({ color: '#2a5a3a', roughness: 0.4, side: THREE.DoubleSide, emissive: '#ffdf9a', emissiveIntensity: 0.35 })));
+      shade.position.set(d.x - 0.62, 1.36, d.deskZ + 0.28); shade.rotation.z = 0.5;
+    });
+  } else {
+    // detention: bare, cold, one flickery mood
+    poster(txtPoster('NO\nTALKING', '#6a3030'), -4.0, -ROOM.z - 0.44, 0);
+    poster(txtPoster('NO\nFUN', '#3a3a4a'), ROOM.x + 0.44, 1.2, -Math.PI / 2);
+    poster((c, w, h) => {   // rules sheet, half torn
+      c.fillStyle = '#d8d2c0'; c.fillRect(0, 0, w, h * 0.8);
+      c.fillStyle = '#5a5248'; c.font = '16px Georgia';
+      for (let i = 0; i < 6; i++) c.fillRect(16, 22 + i * 24, w - 40 - Math.random() * 60, 4);
+      c.fillStyle = '#8a2f2f'; c.font = 'bold 22px Georgia'; c.textAlign = 'center';
+      c.fillText('DETENTION RULES', w / 2, 16);
+    }, 3.4, -ROOM.z - 0.44, 0, 0.9, 1.2);
+    // stacked old chairs in a corner
+    for (let i = 0; i < 3; i++) {
+      const ch = add(new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.09, 0.7), mat('#4a4238', { roughness: 0.8 })));
+      ch.position.set(-ROOM.x + 0.9, 0.35 + i * 0.28, ROOM.z - 0.9);
+      ch.rotation.y = i * 0.4; ch.castShadow = true;
+    }
+    // mop + bucket
+    const bucket = add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.16, 0.3, 12), mat('#5a6068', { roughness: 0.4, metalness: 0.4 })));
+    bucket.position.set(ROOM.x - 0.7, 0.15, ROOM.z - 0.7);
+    const mop = add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.6, 8), mat('#8a6a42')));
+    mop.position.set(ROOM.x - 0.62, 0.9, ROOM.z - 0.62); mop.rotation.z = 0.25;
   }
 
-  // student desks + chairs (+ paper, bottle, and a flask in the lab)
+  // student desks + chairs (+ paper, bottle, map-specific desk prop)
   const wood = mat(PAL.deskTop, { roughness: 0.55 }), leg = mat(PAL.leg, { roughness: 0.45 });
   DESKS.forEach((d, i) => {
     const top = add(new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.08, 1.0), wood));
@@ -259,6 +473,9 @@ export function buildWorld(scene, mapId = 'classroom') {
       const fl = add(new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 10),
         mat(['#5ac07a', '#c05a8a', '#d8b04e'][i % 3], { roughness: 0.25, transparent: true, opacity: 0.85 })));
       fl.position.set(d.x + 0.62, 1.2, d.deskZ - 0.3);
+    } else if (mapId === 'library' && i % 2 === 0) {
+      const bk = add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.22), mat(['#8a3a34', '#3a5a8a', '#3f7a4c'][i % 3], { roughness: 0.8 })));
+      bk.position.set(d.x + 0.6, 1.13, d.deskZ + 0.25); bk.rotation.y = 0.4;
     }
     // chair
     const seat = add(new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.07, 0.8), mat(PAL.chair, { roughness: 0.6 })));
@@ -309,19 +526,6 @@ export function buildWorld(scene, mapId = 'classroom') {
   scene.add(G);
   worldGroup = G;
   return { surfaces, paperMeshes, bottleMeshes, clockHand: hand, mapId };
-}
-
-export function lights(scene) {
-  scene.add(new THREE.HemisphereLight('#f2ecff', '#5c5044', 0.85));
-  const sun = new THREE.DirectionalLight('#ffeccf', 1.7);
-  sun.position.set(-9, 9, 3);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -13; sun.shadow.camera.right = 13;
-  sun.shadow.camera.top = 12; sun.shadow.camera.bottom = -13;
-  sun.shadow.camera.far = 45; sun.shadow.bias = -0.0004;
-  scene.add(sun);
-  scene.add(new THREE.AmbientLight('#b8c0d4', 0.4));
 }
 
 // keep a walking body out of desks/furniture. Obstacles are tight rectangles
