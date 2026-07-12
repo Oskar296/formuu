@@ -25,10 +25,30 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.04;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#cfd8e4');
 scene.fog = new THREE.Fog('#cfd8e4', 24, 46);
+
+// image-based lighting: a soft sky→ground gradient env map so every material
+// gets gentle reflections and ambient variation instead of reading flat. Rough
+// surfaces (walls) barely show it; glass, metal and bottles come alive.
+function buildEnv(sky, mid, ground) {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const c = cv.getContext('2d');
+  const g = c.createLinearGradient(0, 0, 0, 128);
+  g.addColorStop(0, sky); g.addColorStop(0.5, mid); g.addColorStop(1, ground);
+  c.fillStyle = g; c.fillRect(0, 0, 128, 128);
+  const tx = new THREE.CanvasTexture(cv);
+  tx.mapping = THREE.EquirectangularReflectionMapping;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const env = pmrem.fromEquirectangular(tx).texture;
+  pmrem.dispose(); tx.dispose();
+  return env;
+}
+const ENV_DAY = buildEnv('#eae4d4', '#cbc4b6', '#7d766a');   // warm neutral, keeps wood tones rich
+const ENV_NIGHT = buildEnv('#2a3350', '#1c2334', '#12151e');
+scene.environment = ENV_DAY;
 const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 90);
 // the profile stores a HORIZONTAL fov (like Minecraft's wide feel); the
 // vertical fov is derived from the window shape so narrow windows and
@@ -43,7 +63,9 @@ function applyFov() {
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; applyFov(); }
 addEventListener('resize', resize); resize();
 lights(scene);
+const applyEnv = mapId => { scene.environment = mapId === 'detention' ? ENV_NIGHT : ENV_DAY; };
 let room = buildWorld(scene, 'classroom');
+applyEnv(room.mapId);
 bakeFigure();
 
 // ---------------------------------------------------------------- state
@@ -620,7 +642,7 @@ function handleVerdict(v) {
 function startRound(data) {
   S.seed = data.seed; S.seats = data.seats; S.teacherId = data.teacherId;
   S.diff = data.diff || 'normal'; S.roundCounted = false; S.warned30 = false;
-  if (room.mapId !== (data.map || 'classroom')) room = buildWorld(scene, data.map || 'classroom');
+  if (room.mapId !== (data.map || 'classroom')) { room = buildWorld(scene, data.map || 'classroom'); applyEnv(room.mapId); }
   S.exam = generateExam(data.seed);
   S.answers = {}; S.strikes = {}; S.expelled = {}; S.knowledge = {};
   S.authority = 100; S.inspection = 100; S.duty = null; S.riotUntil = 0;

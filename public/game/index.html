@@ -10,6 +10,11 @@
   html, body { width: 100%; height: 100%; overflow: hidden; background: #14161f; }
   body { font-family: 'Segoe UI', system-ui, sans-serif; color: #f0ede4; user-select: none; -webkit-user-select: none; }
   #c { position: fixed; inset: 0; display: block; }
+  /* permanent cinematic vignette + a faint warm/cool grade over the 3D view */
+  #vignette { position: fixed; inset: 0; z-index: 10; pointer-events: none;
+    background:
+      radial-gradient(ellipse 120% 92% at 50% 44%, transparent 48%, rgba(6,8,16,.42) 100%),
+      linear-gradient(180deg, rgba(255,244,224,.06), rgba(10,14,30,.12)); }
   button { font-family: inherit; cursor: pointer; }
   .hidden { display: none !important; }
   .dim { opacity: .55; }
@@ -21,10 +26,14 @@
     backdrop-filter: blur(2.5px); }
   #menuRight { display: flex; flex-direction: column; align-items: center; }
   h1.logo { font-size: clamp(34px, 6vw, 58px); font-weight: 900; letter-spacing: 3px;
-    text-shadow: 0 3px 0 #8a2f2f, 0 7px 24px rgba(0,0,0,.6); }
-  .tag { letter-spacing: 4px; font-size: 12.5px; opacity: .65; margin-top: 6px; }
-  .card { margin-top: 22px; background: #232837ee; border: 1px solid #3a4156; border-radius: 16px;
-    padding: 20px 24px; width: min(420px, 92vw); }
+    background: linear-gradient(180deg, #fff 30%, #f0d9a8 100%); -webkit-background-clip: text;
+    background-clip: text; color: transparent;
+    filter: drop-shadow(0 3px 0 #8a2f2f) drop-shadow(0 8px 22px rgba(0,0,0,.6)); }
+  .tag { letter-spacing: 4px; font-size: 12.5px; opacity: .6; margin-top: 8px; }
+  .card { margin-top: 22px; background: linear-gradient(180deg, #262c3ef2, #1c2130f2);
+    border: 1px solid #3a4156; border-top-color: #55607e; border-radius: 18px;
+    padding: 22px 24px; width: min(420px, 92vw);
+    box-shadow: 0 20px 60px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05); }
   #whoRow { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 14px; }
   #whoDot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff3; }
   #whoName { font-size: 17px; font-weight: 700; }
@@ -35,9 +44,15 @@
     background: #171b26; color: #cfd3e0; font-size: 14.5px; }
   .roleRow button.sel { background: #3a4a7a; border-color: #7a8ac9; color: #fff; }
   .bigBtn { width: 100%; padding: 13px; font-size: 16px; font-weight: 800; letter-spacing: 1px;
-    border: none; border-radius: 10px; background: linear-gradient(120deg, #e0b64e, #d68a3f); color: #241a08; }
-  .bigBtn.green { background: linear-gradient(120deg, #8fd39e, #5aa86b); color: #12210f; margin-bottom: 10px; }
-  .bigBtn:disabled { filter: grayscale(.8); opacity: .5; cursor: default; }
+    border: none; border-radius: 11px; background: linear-gradient(120deg, #eec25a, #d68a3f); color: #241a08;
+    box-shadow: 0 4px 14px rgba(224,182,78,.28), inset 0 1px 0 rgba(255,255,255,.35);
+    transition: transform .1s, box-shadow .15s; }
+  .bigBtn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 7px 20px rgba(224,182,78,.4), inset 0 1px 0 rgba(255,255,255,.4); }
+  .bigBtn:active:not(:disabled) { transform: translateY(1px); }
+  .bigBtn.green { background: linear-gradient(120deg, #9adca9, #5aa86b); color: #12210f; margin-bottom: 10px;
+    box-shadow: 0 4px 14px rgba(122,200,140,.28), inset 0 1px 0 rgba(255,255,255,.35); }
+  .bigBtn.green:hover:not(:disabled) { box-shadow: 0 7px 20px rgba(122,200,140,.42), inset 0 1px 0 rgba(255,255,255,.4); }
+  .bigBtn:disabled { filter: grayscale(.8); opacity: .5; cursor: default; box-shadow: none; }
   .row2 { display: flex; gap: 10px; margin-top: 10px; }
   .row2 input { flex: 1; padding: 11px; border-radius: 10px; border: 1px solid #4a5270; background: #171b26;
     color: #f0ede4; font-size: 15px; text-align: center; text-transform: uppercase; }
@@ -173,6 +188,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="vignette"></div>
 <div id="riotVignette"></div>
 
 <!-- MENU -->
