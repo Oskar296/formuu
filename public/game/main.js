@@ -54,7 +54,7 @@ const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 90);
 // vertical fov is derived from the window shape so narrow windows and
 // phones don't collapse into a zoomed-in tunnel
 const DEG = Math.PI / 180;
-const BASE_FOVH = 100;   // fixed horizontal FOV — not user-adjustable (fair play)
+const BASE_FOVH = 110;   // fixed, wide resting horizontal FOV (not too zoomed in)
 let fovKick = 0;         // sprinting widens the view a touch
 let zoom = 1, zoomTarget = 1;   // hold-to-zoom (Minecraft-style), 1 = normal
 function applyFov() {
@@ -1211,9 +1211,11 @@ function frame(nowMs) {
     S.me.walk = il ? 1 : 0;
     if (t > S.poseAt) { S.poseAt = t + 0.11; S.net.send('pose', { x: S.me.x, z: S.me.z, yaw: S.yaw, walk: S.me.walk }); }
   }
-  // hold-to-zoom (Minecraft spyglass style) + sprint FOV kick, both eased
+  // hold-to-zoom (Minecraft spyglass style): Z zooms in, X zooms out (wider);
+  // plus the sprint FOV kick, all eased
   const inRound = ['prep', 'inspect', 'exam'].includes(S.phase);
-  zoomTarget = (S.keys.KeyZ && inRound && !modalOpen()) ? 3.6 : 1;
+  const canZoom = inRound && !modalOpen();
+  zoomTarget = canZoom && S.keys.KeyZ ? 3.6 : canZoom && S.keys.KeyX ? 0.8 : 1;
   const kick = S.sprinting && zoomTarget === 1 ? 11 : 0;   // no sprint-widen while scoping
   let fovDirty = false;
   if (Math.abs(zoom - zoomTarget) > 0.002) { zoom += (zoomTarget - zoom) * Math.min(1, dt * 12); fovDirty = true; }
