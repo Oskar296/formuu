@@ -128,6 +128,52 @@ const bookRowTex = () => tex(512, 256, (c, w, h) => {
   }
 });
 
+const clamp = v => Math.max(0, Math.min(255, v | 0));
+const hex2rgb = h => { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
+
+// painted wall: the flat colour plus faint mottling, brush streaks, and a soft
+// top-down gradient so big walls catch light unevenly instead of reading flat
+const paintTex = (hex) => {
+  const [r, g, bl] = hex2rgb(hex);
+  return tex(256, 256, (c, w, h) => {
+    const grad = c.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, `rgb(${clamp(r + 10)},${clamp(g + 10)},${clamp(bl + 10)})`);
+    grad.addColorStop(1, `rgb(${clamp(r - 12)},${clamp(g - 12)},${clamp(bl - 12)})`);
+    c.fillStyle = grad; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 1100; i++) {
+      const a = (Math.random() - 0.5) * 14;
+      c.fillStyle = `rgba(${clamp(r + a)},${clamp(g + a)},${clamp(bl + a)},0.16)`;
+      c.fillRect(Math.random() * w, Math.random() * h, 3, 3);
+    }
+    for (let i = 0; i < 46; i++) {
+      c.strokeStyle = `rgba(255,255,255,${0.015 + Math.random() * 0.03})`;
+      c.lineWidth = 1; const x = Math.random() * w;
+      c.beginPath(); c.moveTo(x, 0); c.lineTo(x + (Math.random() - 0.5) * 10, h); c.stroke();
+    }
+  }, [3, 2]);
+};
+
+// wood grain for desktops: flowing streaks + the odd knot
+const woodGrainTex = (base) => {
+  const [r, g, bl] = hex2rgb(base);
+  return tex(256, 256, (c, w, h) => {
+    c.fillStyle = base; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 30; i++) {
+      const yy = (i / 30) * h + (Math.random() - 0.5) * 6, a = (Math.random() - 0.5) * 40;
+      c.strokeStyle = `rgba(${clamp(r + a)},${clamp(g + a)},${clamp(bl + a)},0.55)`;
+      c.lineWidth = 0.8 + Math.random() * 2.4;
+      c.beginPath(); c.moveTo(0, yy);
+      c.bezierCurveTo(w * 0.33, yy + (Math.random() - 0.5) * 9, w * 0.66, yy + (Math.random() - 0.5) * 9, w, yy + (Math.random() - 0.5) * 6);
+      c.stroke();
+    }
+    for (let k = 0; k < 2; k++) {
+      const kx = 30 + Math.random() * (w - 60), ky = 30 + Math.random() * (h - 60);
+      c.strokeStyle = `rgba(${clamp(r - 34)},${clamp(g - 28)},${clamp(bl - 22)},0.5)`;
+      for (let rr = 2; rr < 13; rr += 2.2) { c.beginPath(); c.ellipse(kx, ky, rr, rr * 0.62, 0.4, 0, 7); c.stroke(); }
+    }
+  }, [2, 1]);
+};
+
 // ambience per map: sky/fog + light rig settings, applied on every build
 const AMB = {
   classroom: { bg: '#cfd8e4', sun: 1.7, sunCol: '#ffeccf', hemi: 0.85, amb: 0.4, panel: '#fdfdf2' },
@@ -199,18 +245,29 @@ export function buildWorld(scene, mapId = 'classroom') {
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
 
-  // walls + rail + baseboard + ceiling
-  const wallTop = mat(PAL.wallTop), wallBot = mat(PAL.wallBot), base = mat('#4a4038', { roughness: 0.6 });
+  // walls + dado rail + baseboard + cornice + ceiling
+  const wallTop = new THREE.MeshStandardMaterial({ map: paintTex(PAL.wallTop), roughness: 0.92 });
+  const wallBot = new THREE.MeshStandardMaterial({ map: paintTex(PAL.wallBot), roughness: 0.86 });
+  const base = mat('#4a4038', { roughness: 0.6 });
+  const railM = mat(PAL.rail, { roughness: 0.55 });
+  const cornM = mat(night ? '#3a4150' : '#f0ede2', { roughness: 0.7 });
   const mkWall = (w, x, z, ry) => {
-    const top = add(new THREE.Mesh(new THREE.PlaneGeometry(w, H - 1.4), wallTop));
-    top.position.set(x, 1.4 + (H - 1.4) / 2, z); top.rotation.y = ry;
-    const bot = add(new THREE.Mesh(new THREE.PlaneGeometry(w, 1.4), wallBot));
-    bot.position.set(x, 0.7, z); bot.rotation.y = ry;
     const along = ry === 0 || Math.abs(ry) === Math.PI;
-    const rail = add(new THREE.Mesh(new THREE.BoxGeometry(along ? w : 0.06, 0.08, along ? 0.06 : w), mat(PAL.rail, { roughness: 0.6 })));
-    rail.position.set(x, 1.42, z);
-    const bb = add(new THREE.Mesh(new THREE.BoxGeometry(along ? w : 0.07, 0.14, along ? 0.07 : w), base));
-    bb.position.set(x, 0.07, z);
+    const top = add(new THREE.Mesh(new THREE.PlaneGeometry(w, H - 1.4), wallTop));
+    top.position.set(x, 1.4 + (H - 1.4) / 2, z); top.rotation.y = ry; top.receiveShadow = true;
+    const bot = add(new THREE.Mesh(new THREE.PlaneGeometry(w, 1.4), wallBot));
+    bot.position.set(x, 0.7, z); bot.rotation.y = ry; bot.receiveShadow = true;
+    // dado rail (chair rail) between the two tones, rounded profile
+    const rail = add(new THREE.Mesh(new THREE.BoxGeometry(along ? w : 0.07, 0.1, along ? 0.07 : w), railM));
+    rail.position.set(x, 1.42, z); rail.castShadow = true;
+    const railLip = add(new THREE.Mesh(new THREE.BoxGeometry(along ? w : 0.04, 0.03, along ? 0.04 : w), railM));
+    railLip.position.set(x, 1.49, z);
+    // skirting board
+    const bb = add(new THREE.Mesh(new THREE.BoxGeometry(along ? w : 0.09, 0.18, along ? 0.09 : w), base));
+    bb.position.set(x, 0.09, z);
+    // crown moulding at the ceiling
+    const corn = add(new THREE.Mesh(new THREE.BoxGeometry(along ? w : 0.14, 0.16, along ? 0.14 : w), cornM));
+    corn.position.set(x, H - 0.12, z);
   };
   mkWall(ROOM.x * 2 + 1, 0, -ROOM.z - 0.5, 0);
   mkWall(ROOM.x * 2 + 1, 0, ROOM.z + 0.5, Math.PI);
@@ -251,43 +308,60 @@ export function buildWorld(scene, mapId = 'classroom') {
   const chalkTray = add(new THREE.Mesh(new THREE.BoxGeometry(6.6, 0.06, 0.18), frame));
   chalkTray.position.set(BOARD.x, 0.9, -ROOM.z - 0.36);
 
-  // windows on the left wall (skip in the library — shelves live there;
-  // in detention they show the night sky and one is boarded up)
+  // windows on the left wall: proper cased frames with a sill, cross mullions
+  // dividing four panes, and glass that glows a little (library has shelves
+  // there instead; detention shows the night sky and one is boarded up)
   if (mapId !== 'library') {
-    const wy = mapId === 'gym' ? 3.9 : 2.3, wh = mapId === 'gym' ? 1.3 : 1.9;
+    const wy = mapId === 'gym' ? 3.9 : 2.3, wh = mapId === 'gym' ? 1.5 : 2.0, ww = 2.4;
     const winList = [-ROOM.z * 0.5, 0.1 * ROOM.z, ROOM.z * 0.64];
+    const wallX = -ROOM.x - 0.5, glassX = wallX + 0.09, frameX = wallX + 0.16;
+    const skyTex = tex(256, 256, (c) => {
+      if (night) {
+        const g2 = c.createLinearGradient(0, 0, 0, 256);
+        g2.addColorStop(0, '#0a1024'); g2.addColorStop(1, '#20325c');
+        c.fillStyle = g2; c.fillRect(0, 0, 256, 256);
+        c.fillStyle = 'rgba(255,255,255,0.85)';
+        for (let i = 0; i < 55; i++) c.fillRect(Math.random() * 256, Math.random() * 256, 1.5 + Math.random(), 1.5 + Math.random());
+        c.fillStyle = '#eef1f8'; c.beginPath(); c.arc(188, 58, 25, 0, 7); c.fill();
+        c.fillStyle = '#20325c'; c.beginPath(); c.arc(199, 50, 21, 0, 7); c.fill();
+      } else {
+        const g2 = c.createLinearGradient(0, 0, 0, 256);
+        g2.addColorStop(0, '#7fb0ec'); g2.addColorStop(0.58, '#cbe2f6'); g2.addColorStop(1, '#e8f2dc');
+        c.fillStyle = g2; c.fillRect(0, 0, 256, 256);
+        c.fillStyle = 'rgba(255,255,255,0.94)';
+        for (const [x2, y2, rx, ry2] of [[58, 66, 30, 16], [96, 78, 38, 20], [176, 54, 26, 14], [212, 92, 22, 12]]) {
+          c.beginPath(); c.ellipse(x2, y2, rx, ry2, 0, 0, 7); c.fill();
+        }
+        c.fillStyle = '#7fb45e'; c.fillRect(0, 214, 256, 42);
+        c.fillStyle = '#6aa04e'; for (let i = 0; i < 10; i++) { c.beginPath(); c.moveTo(i * 28, 214); c.lineTo(i * 28 + 13, 190); c.lineTo(i * 28 + 26, 214); c.fill(); }
+      }
+    });
+    const frameM = mat(night ? '#39414f' : '#f2efe6', { roughness: 0.55 });
+    const glassM = new THREE.MeshStandardMaterial({
+      map: skyTex, roughness: 0.12, metalness: 0.0,
+      emissive: new THREE.Color(night ? '#16294f' : '#bcd6f2'), emissiveIntensity: night ? 0.55 : 0.22,
+    });
     winList.forEach((wz, wi) => {
-      const glass = add(new THREE.Mesh(new THREE.PlaneGeometry(2.4, wh), new THREE.MeshBasicMaterial({
-        map: tex(256, 256, (c) => {
-          if (night) {
-            const g2 = c.createLinearGradient(0, 0, 0, 256);
-            g2.addColorStop(0, '#0c1226'); g2.addColorStop(1, '#1c2a4a');
-            c.fillStyle = g2; c.fillRect(0, 0, 256, 256);
-            c.fillStyle = '#e8ecf4'; c.beginPath(); c.arc(190, 62, 26, 0, 7); c.fill();
-            c.fillStyle = '#0c1226'; c.beginPath(); c.arc(200, 54, 22, 0, 7); c.fill();
-            c.fillStyle = 'rgba(255,255,255,0.85)';
-            for (let i = 0; i < 40; i++) c.fillRect(Math.random() * 256, Math.random() * 256, 1.6, 1.6);
-          } else {
-            const g2 = c.createLinearGradient(0, 0, 0, 256);
-            g2.addColorStop(0, '#9cc2ec'); g2.addColorStop(0.65, '#d5e6f6'); g2.addColorStop(1, '#eef4da');
-            c.fillStyle = g2; c.fillRect(0, 0, 256, 256);
-            c.fillStyle = 'rgba(255,255,255,0.9)';
-            for (const [x2, y2, r2] of [[70, 70, 24], [104, 80, 30], [180, 56, 20]]) { c.beginPath(); c.arc(x2, y2, r2, 0, 7); c.fill(); }
-            c.fillStyle = '#8fbf6a'; c.fillRect(0, 214, 256, 42);
-          }
-        }),
-      })));
-      glass.rotation.y = Math.PI / 2;
-      glass.position.set(-ROOM.x - 0.44, wy, wz);
-      const fm = mat(night ? '#4a5060' : '#e8e4d8', { roughness: 0.5 });
-      const v = add(new THREE.Mesh(new THREE.BoxGeometry(0.06, wh + 0.1, 0.09), fm));
-      v.position.set(-ROOM.x - 0.4, wy, wz);
-      const hh = add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.09, 2.5), fm));
-      hh.position.set(-ROOM.x - 0.4, wy, wz);
-      if (night && wi === 2) for (const rot of [0.5, -0.4]) {  // boarded-up window
-        const plank = add(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.24, 2.6), mat('#5a4632', { roughness: 0.9 })));
-        plank.position.set(-ROOM.x - 0.36, wy, wz);
-        plank.rotation.x = rot;
+      const glass = add(new THREE.Mesh(new THREE.PlaneGeometry(ww, wh), glassM));
+      glass.rotation.y = Math.PI / 2; glass.position.set(glassX, wy, wz);
+      // outer casing bars (thin in x = depth into room, proud of the glass)
+      for (const zz of [wz - ww / 2 - 0.07, wz + ww / 2 + 0.07]) {
+        const m = add(new THREE.Mesh(new THREE.BoxGeometry(0.18, wh + 0.28, 0.12), frameM));
+        m.position.set(frameX, wy, zz); m.castShadow = true;
+      }
+      for (const yy of [wy - wh / 2 - 0.07, wy + wh / 2 + 0.07]) {
+        const m = add(new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, ww + 0.26), frameM));
+        m.position.set(frameX, yy, wz); m.castShadow = true;
+      }
+      // cross mullions → four panes
+      const mv = add(new THREE.Mesh(new THREE.BoxGeometry(0.1, wh, 0.05), frameM)); mv.position.set(frameX - 0.02, wy, wz);
+      const mh = add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, ww), frameM)); mh.position.set(frameX - 0.02, wy, wz);
+      // sill jutting into the room
+      const sill = add(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.09, ww + 0.5), frameM));
+      sill.position.set(wallX + 0.22, wy - wh / 2 - 0.16, wz); sill.castShadow = sill.receiveShadow = true;
+      if (night && wi === 2) for (const rot of [0.5, -0.4]) {   // boarded-up window
+        const plank = add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.26, 2.7), mat('#5a4632', { roughness: 0.9 })));
+        plank.position.set(frameX + 0.02, wy, wz); plank.rotation.x = rot; plank.castShadow = true;
       }
     });
   }
@@ -451,14 +525,30 @@ export function buildWorld(scene, mapId = 'classroom') {
   }
 
   // student desks + chairs (+ paper, bottle, map-specific desk prop)
-  const wood = mat(PAL.deskTop, { roughness: 0.55 }), leg = mat(PAL.leg, { roughness: 0.45 });
+  const metalTable = mapId === 'lab' || mapId === 'gym';
+  const wood = metalTable
+    ? mat(PAL.deskTop, { roughness: 0.4, metalness: 0.2 })
+    : new THREE.MeshStandardMaterial({ map: woodGrainTex(PAL.deskTop), roughness: 0.48 });
+  const leg = mat(PAL.leg, { roughness: 0.4, metalness: 0.35 });
+  const edgeM = mat(PAL.leg, { roughness: 0.5, metalness: 0.25 });
   DESKS.forEach((d, i) => {
-    const top = add(new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.08, 1.0), wood));
-    top.position.set(d.x, 1.06, d.deskZ); top.castShadow = top.receiveShadow = true;
+    const top = add(new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.07, 1.0), wood));
+    top.position.set(d.x, 1.07, d.deskZ); top.castShadow = top.receiveShadow = true;
     surfaces.push({ mesh: top, desk: i });
-    for (const [lx, lz] of [[-0.75, -0.4], [0.75, -0.4], [-0.75, 0.4], [0.75, 0.4]]) {
-      const l = add(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.02, 10), leg));
-      l.position.set(d.x + lx, 0.51, d.deskZ + lz);
+    // trim band just under the top + a modesty apron at the front
+    const band = add(new THREE.Mesh(new THREE.BoxGeometry(1.74, 0.05, 1.04), edgeM));
+    band.position.set(d.x, 1.02, d.deskZ);
+    const apron = add(new THREE.Mesh(new THREE.BoxGeometry(1.52, 0.22, 0.05), wood));
+    apron.position.set(d.x, 0.9, d.deskZ - 0.4); apron.castShadow = true;
+    // slightly tapered legs
+    for (const [lx, lz] of [[-0.76, -0.4], [0.76, -0.4], [-0.76, 0.4], [0.76, 0.4]]) {
+      const l = add(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.042, 1.0, 12), leg));
+      l.position.set(d.x + lx, 0.5, d.deskZ + lz); l.castShadow = true;
+    }
+    // stretcher bars between each side's legs for a real-furniture look
+    for (const lx of [-0.76, 0.76]) {
+      const sb = add(new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.78, 8), leg));
+      sb.position.set(d.x + lx, 0.26, d.deskZ); sb.rotation.x = Math.PI / 2;
     }
     const paper = add(new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.72), mat('#f4efdd', { roughness: 0.95 })));
     paper.rotation.x = -Math.PI / 2; paper.rotation.z = 0.06;
