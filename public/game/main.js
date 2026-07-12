@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { buildClassroom, lights, collide, DESKS, TEACHER_DESK, BOARD, STOOL, ROOM, seatAdjacent } from './src/classroom.js';
+import { buildWorld, MAPS, lights, collide, DESKS, TEACHER_DESK, BOARD, STOOL, ROOM, seatAdjacent } from './src/classroom.js';
 import { makeFigure, bakeFigure } from './src/figure.js';
 import { generateExam, dealKnowledge, score, N_QUESTIONS, LETTERS } from './src/exam.js';
 import { makeNet, onlineAvailable, makeId } from './src/net.js';
@@ -29,11 +29,21 @@ renderer.toneMappingExposure = 1.05;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#cfd8e4');
 scene.fog = new THREE.Fog('#cfd8e4', 24, 46);
-const camera = new THREE.PerspectiveCamera(profile.fov, 1, 0.05, 90);
-function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 90);
+// the profile stores a HORIZONTAL fov (like Minecraft's wide feel); the
+// vertical fov is derived from the window shape so narrow windows and
+// phones don't collapse into a zoomed-in tunnel
+const DEG = Math.PI / 180;
+let fovKick = 0;   // sprinting widens the view a touch
+function applyFov() {
+  const h = Math.min(150, profile.fovH + fovKick);
+  camera.fov = Math.max(45, Math.min(120, 2 * Math.atan(Math.tan(h * DEG / 2) / camera.aspect) / DEG));
+  camera.updateProjectionMatrix();
+}
+function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; applyFov(); }
 addEventListener('resize', resize); resize();
 lights(scene);
-const room = buildClassroom(scene);
+let room = buildWorld(scene, 'classroom');
 bakeFigure();
 
 // ---------------------------------------------------------------- state
@@ -47,6 +57,7 @@ const S = {
   traps: new Map(), notes: new Map(),   // notes: stuck under desks AND landed on desks
   items: new Map(),                     // rare cheat items spawned around the room
   standing: false, standingSet: {}, lastOOS: {}, hasMirror: false, hasCushion: false,
+  hasSmoke: false, hasPass: false, hasRoach: false, smokes: [], passUntil: {},
   attach: {}, myTrapUsed: false, myNoteUsed: false,
   me: { x: 4, z: 6, yaw: Math.PI, walk: 0 }, vx: 0, vz: 0, stun: 0, stuck: 0, keys: {},
   yaw: Math.PI, pitch: 0, locked: false,
@@ -82,7 +93,7 @@ $('viewerClose').onclick = () => $('viewer').classList.add('hidden');
 $('viewer').addEventListener('pointerup', e => { if (e.target.id === 'viewer') $('viewer').classList.add('hidden'); });
 $('help').addEventListener('pointerup', e => { if (e.target.id === 'help') $('help').classList.add('hidden'); });
 const show = (id, v) => $(id).classList.toggle('hidden', !v);
-const modalOpen = () => ['viewer', 'scrib', 'help', 'settings'].some(id => !$(id).classList.contains('hidden'));
+const modalOpen = () => ['viewer', 'scrib', 'help', 'settings', 'howto'].some(id => !$(id).classList.contains('hidden'));
 
 function sheetImage(name, answers) {
   const cv = document.createElement('canvas'); cv.width = 340; cv.height = 300;
@@ -103,11 +114,29 @@ function sheetImage(name, answers) {
 function refreshWho() {
   $('whoName').textContent = profile.name || 'no name yet';
   $('whoDot').style.background = colorHex(profile.color);
+  const st = profile.stats;
+  $('statLine').textContent = st.rounds ? `🎓 ${st.rounds} round${st.rounds > 1 ? 's' : ''} played · ${st.wins} won` : '';
 }
 {
   let role = 'student';
   $('roleStudent').onclick = () => { role = 'student'; $('roleStudent').classList.add('sel'); $('roleTeacher').classList.remove('sel'); };
   $('roleTeacher').onclick = () => { role = 'teacher'; $('roleTeacher').classList.add('sel'); $('roleStudent').classList.remove('sel'); };
+  S.mapSel = 'random';
+  [...$('mapRow').children].forEach(b => (b.onclick = () => {
+    S.mapSel = b.dataset.map;
+    [...$('mapRow').children].forEach(x => x.classList.toggle('sel', x === b));
+    $('mapNote').textContent = S.mapSel === 'random' ? '🎲 random map each round'
+      : `${MAPS[S.mapSel].icon} ${MAPS[S.mapSel].name}${MAPS[S.mapSel].items.includes('smoke') ? ' — exclusive: smoke vial' : MAPS[S.mapSel].items.includes('pass') ? ' — exclusive: hall pass' : ''}`;
+  }));
+  S.diffSel = 'normal';
+  const DIFF_NOTE = { chill: '😴 substitute teacher — barely awake', normal: '🧑‍🏫 normal teacher', hawk: '🦅 hawk — sees EVERYTHING, students cheat sneakier' };
+  [...$('diffRow').children].forEach(b => (b.onclick = () => {
+    S.diffSel = b.dataset.diff;
+    [...$('diffRow').children].forEach(x => x.classList.toggle('sel', x === b));
+    $('diffNote').textContent = DIFF_NOTE[S.diffSel];
+  }));
+  $('btnHow').onclick = () => show('howto', true);
+  $('btnHowClose').onclick = () => show('howto', false);
   $('btnSolo').onclick = () => join('solo', role);
   $('btnCreate').onclick = () => join('create', role);
   $('btnJoin').onclick = () => join('join', role, $('codeInput').value.trim().toUpperCase());
@@ -119,13 +148,13 @@ function refreshWho() {
   $('soundBtn').onclick = () => ($('soundBtn').textContent = sfx.toggle() ? '🔇' : '🔊');
   // settings: username + color
   $('setFov').oninput = () => {
-    profile.fov = +$('setFov').value;
-    $('fovVal').textContent = profile.fov;
-    camera.fov = profile.fov; camera.updateProjectionMatrix();
+    profile.fovH = +$('setFov').value;
+    $('fovVal').textContent = profile.fovH;
+    applyFov();
   };
   $('btnSettings').onclick = () => {
     $('setName').value = profile.name;
-    $('setFov').value = profile.fov; $('fovVal').textContent = profile.fov;
+    $('setFov').value = profile.fovH; $('fovVal').textContent = profile.fovH;
     const g = $('colorGrid'); g.innerHTML = '';
     for (const c of COLORS) {
       const d = document.createElement('div');
@@ -198,7 +227,9 @@ function hostStart() {
   if (t.length !== 1 || st.length < 1) return;
   const seats = {};
   st.slice(0, 9).forEach((p, i) => (seats[p.id] = i));
-  S.net.send('start', { seed: +(P.get('seed') || (Math.random() * 1e9 | 0)), seats, teacherId: t[0].id });
+  const ids = Object.keys(MAPS);
+  const map = P.get('map') || (S.mapSel === 'random' || !MAPS[S.mapSel] ? ids[(Math.random() * ids.length) | 0] : S.mapSel);
+  S.net.send('start', { seed: +(P.get('seed') || (Math.random() * 1e9 | 0)), seats, teacherId: t[0].id, map, diff: S.diffSel || 'normal' });
 }
 function hostPhase(phase) {
   const endsAt = Date.now() + DUR[phase] / TSCALE * 1000;
@@ -213,11 +244,13 @@ function hostPhase(phase) {
     S.nextDutyAt = now() + (14 + Math.random() * 10) / TSCALE;
     for (const tr of S.traps.values())
       if (tr.kind === 'clock' && tr.armed) tr.ringAt = now() + (0.25 + Math.random() * 0.5) * DUR.exam / TSCALE;
-    // rare cheat items appear around the room — you must LEAVE YOUR SEAT to grab
-    // one (map-specific pools later; the classroom gets all three)
-    const spots = [[-6.4, -5.3], [6.4, -2.2], [-6.4, 3.1], [6.4, 5.4], [0, 7.0], [-2.2, -4.8], [3.2, -5.1]]
+    // rare cheat items appear around the room — you must LEAVE YOUR SEAT to
+    // grab one. Each map has its own pool (lab: smoke vial, gym: hall pass)
+    const rx = ROOM.x - 2.0, rz = ROOM.z - 1.2;
+    const spots = [[-rx, -rz + 2], [rx, -2.2], [-rx, 3.1], [rx, rz - 1], [0, rz],
+      [TEACHER_DESK.x, TEACHER_DESK.z + 1.7], [3.2, -rz + 2.4]]
       .sort(() => Math.random() - 0.5);
-    ['mirror', 'scrap', 'cushion'].sort(() => Math.random() - 0.5).forEach((kind, i) =>
+    [...MAPS[room.mapId].items].sort(() => Math.random() - 0.5).forEach((kind, i) =>
       S.net.send('itemSpawn', { id: 'it-' + makeId().slice(0, 5), kind, pos: [spots[i][0], 0, spots[i][1]] }));
   }
 }
@@ -236,6 +269,7 @@ function hostTick(dt) {
   // window so the teacher can accuse a wanderer at ANY moment, not just 5s
   for (const p of students()) {
     if (S.expelled[p.id] || S.seats[p.id] == null) continue;
+    if (S.passUntil[p.id] > t) continue;   // hall pass: wandering is legal
     if (S.standingSet[p.id] && t > (S.lastOOS[p.id] || 0) + 1.4) { S.lastOOS[p.id] = t; logCheat(p.id, 'OUT OF THEIR SEAT'); }
   }
   if (!S.duty && t >= S.nextDutyAt) {
@@ -296,8 +330,18 @@ function hostResults(reason) {
   if (rows[0] && !rows[0].expelled) rows[0].crown = true;
   S.net.send('results', { rows, avg, pass, reason });
 }
+function inSmoke(pid) {
+  if (!S.smokes.length) return false;
+  const t = now();
+  const pose = S.standingSet[pid] && S.poses[pid];
+  const seat = S.seats[pid];
+  const px = pose ? pose.x : seat != null ? DESKS[seat].x : null;
+  const pz = pose ? pose.z : seat != null ? DESKS[seat].z : null;
+  if (px == null) return false;
+  return S.smokes.some(s => s.until > t && Math.hypot(s.x - px, s.z - pz) < 2.8);
+}
 function logCheat(pid, kind, img) {
-  if (ringing()) return;
+  if (ringing() || inSmoke(pid)) return;   // cover noise / cover smoke
   S.cheatLog.push({ pid, kind, img, until: now() + CATCH_WINDOW, riot: inRiot() });
   if (S.cheatLog.length > 300) S.cheatLog.splice(0, 150);
 }
@@ -377,22 +421,61 @@ function onEvent(ev) {
       scene.remove(it.mesh); S.items.delete(data.id);
       if (data.by === S.myId) {
         sfx.pickup();
-        if (it.kind === 'scrap') {   // instantly reveals one answer you don't have
+        if (it.kind === 'scrap' || it.kind === 'book') {
+          // scrap reveals one answer; the library's encyclopedia reveals TWO
           const mine = S.answers[S.myId] || [];
-          const missing = S.exam.questions.filter(q => mine[q.id] !== q.correct);
-          if (missing.length) {
+          const n = it.kind === 'book' ? 2 : 1;
+          let got = 0;
+          for (let k = 0; k < n; k++) {
+            const missing = S.exam.questions.filter(q => (S.answers[S.myId] || [])[q.id] !== q.correct);
+            if (!missing.length) break;
             const q = missing[(Math.random() * missing.length) | 0];
             setAnswer(q.id, q.correct);
-            toast(`📜 the scrap says: Q${q.id + 1} = ${LETTERS[q.correct]}!`, 'gold');
-          } else toast('📜 the scrap tells you nothing new');
+            toast(`${it.kind === 'book' ? '📖' : '📜'} ${it.kind === 'book' ? 'the encyclopedia reveals' : 'the scrap says'}: Q${q.id + 1} = ${LETTERS[q.correct]}!`, 'gold');
+            got++;
+          }
+          if (!got) toast(`${it.kind === 'book' ? '📖' : '📜'} tells you nothing new`);
+        } else if (it.kind === 'roach') {
+          S.hasRoach = true;
+          toast('🪳 a cockroach! release it near the teacher to send them running', 'gold');
         } else if (it.kind === 'mirror') {
           S.hasMirror = true;
           toast('🪞 mirror! peek at ANYONE\'s paper from your seat', 'gold');
+        } else if (it.kind === 'smoke') {
+          S.hasSmoke = true;
+          toast('🌫 smoke vial! aim at the floor to smash it — cheats inside the cloud are invisible', 'gold');
+        } else if (it.kind === 'pass') {
+          S.hasPass = true;
+          toast('🎫 hall pass! your next stroll out of your seat is LEGAL for 12s', 'gold');
         } else {
           S.hasCushion = true;
           toast('💨 whoopee cushion! aim at the floor to hide it', 'gold');
         }
       } else if (!isTeacher()) toast(`${ITEM_ICON[it.kind]} ${nameOf(data.by)} grabbed the ${it.kind}`);
+      break;
+    }
+    case 'smoke': {
+      sfx.crash(volAt(data.x, data.z) * 0.7);
+      S.smokes.push({ x: data.x, z: data.z, until: now() + 6, born: now(), mesh: smokePuff(data.x, data.z) });
+      gesture(from, '🌫 SMOKE!');
+      if (isTeacher()) banner('🌫 SMOKE?! WHO BROUGHT SMOKE TO AN EXAM?!', 2600);
+      break;
+    }
+    case 'usePass': {
+      S.passUntil[from] = now() + 12;
+      gesture(from, '🎫 hall pass!', 'rgba(160,130,20,0.85)');
+      if (from === S.myId) toast('🎫 hall pass active — 12 seconds of legal wandering', 'gold');
+      break;
+    }
+    case 'roach': {
+      sfx.sneeze(0.8);
+      gesture(from, '🪳 EEK!');
+      if (isTeacher()) {
+        // the teacher panics: jump back, blinded flails, can't accuse for a bit
+        S.stun = now() + 3.2; blind(1.0);
+        banner('🪳 A COCKROACH?! GET IT AWAY!', 3000);
+        S.lastAccuseAt = now() + 3;   // no accusing while flailing
+      } else banner(`🪳 ${nameOf(from)} let a cockroach loose on the teacher!`, 2600);
       break;
     }
     case 'accuse': if (S.net.isHost()) hostAccuse(from, data.target); break;
@@ -536,6 +619,8 @@ function handleVerdict(v) {
 // ---------------------------------------------------------------- round lifecycle
 function startRound(data) {
   S.seed = data.seed; S.seats = data.seats; S.teacherId = data.teacherId;
+  S.diff = data.diff || 'normal'; S.roundCounted = false; S.warned30 = false;
+  if (room.mapId !== (data.map || 'classroom')) room = buildWorld(scene, data.map || 'classroom');
   S.exam = generateExam(data.seed);
   S.answers = {}; S.strikes = {}; S.expelled = {}; S.knowledge = {};
   S.authority = 100; S.inspection = 100; S.duty = null; S.riotUntil = 0;
@@ -545,6 +630,7 @@ function startRound(data) {
   S.hotSel = -1; S.armedThrow = null; S.sheetOpen = true;
   S.standing = false; S.standingSet = {}; S.lastOOS = {};
   S.hasMirror = false; S.hasCushion = false; S.vx = 0; S.vz = 0;
+  S.hasSmoke = false; S.hasPass = false; S.hasRoach = false; S.passUntil = {};
   for (const pid in S.seats) S.answers[pid] = Array(N_QUESTIONS).fill(null);
   clearRound(false);
   bots.reset();
@@ -576,7 +662,8 @@ function clearRound(alsoUI = true) {
   for (const tr of S.traps.values()) scene.remove(tr.mesh);
   for (const n of S.notes.values()) scene.remove(n.mesh);
   for (const it of S.items.values()) scene.remove(it.mesh);
-  S.traps.clear(); S.notes.clear(); S.items.clear();
+  for (const s of S.smokes) scene.remove(s.mesh);
+  S.traps.clear(); S.notes.clear(); S.items.clear(); S.smokes.length = 0;
   clearBottleLabels();
   sfx.stopRing();
   if (alsoUI) ['sheet', 'teachBar', 'hotbar', 'crosshair', 'prompt', 'helpTip'].forEach(i => show(i, false));
@@ -596,13 +683,13 @@ function setPhase(phase, endsAt) {
     // the paper starts in your hands — free the mouse so answers are clickable
     if (stud && S.sheetOpen && mySeat() != null) document.exitPointerLock && document.exitPointerLock();
   }
-  if (phase === 'prep') banner(stud ? '🛠 RIG THE ROOM — the teacher isn\'t here yet' : '👀 the class is up to something…', 3000);
+  if (phase === 'prep') banner(`${MAPS[room.mapId].icon} ${MAPS[room.mapId].name} — ` + (stud ? '🛠 RIG THE ROOM before the teacher arrives!' : '👀 the class is up to something…'), 3200);
   refreshHotbar();
 }
 
 // ---------------------------------------------------------------- world objects
 const TRAP_ICON = { marbles: '🔮', glue: '🍯', pepper: '🌶', clock: '⏰', cushion: '💨' };
-const ITEM_ICON = { mirror: '🪞', scrap: '📜', cushion: '💨' };
+const ITEM_ICON = { mirror: '🪞', scrap: '📜', cushion: '💨', smoke: '🌫', pass: '🎫', book: '📖', roach: '🪳' };
 function trapMesh(kind, pos) {
   const g = new THREE.Group();
   const m = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, ...o });
@@ -643,6 +730,27 @@ function itemMesh(kind, pos) {
   } else if (kind === 'scrap') {
     const p = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.16), m('#f2e8b8', { side: THREE.DoubleSide, roughness: 0.95 }));
     p.rotation.x = -0.9; p.position.y = 0.28; g.add(p);
+  } else if (kind === 'smoke') {
+    const v = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.16, 10),
+      m('#b8c8d0', { roughness: 0.15, transparent: true, opacity: 0.8 }));
+    v.position.y = 0.3; g.add(v);
+    const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.05, 8), m('#8a6a42'));
+    cork.position.y = 0.4; g.add(cork);
+  } else if (kind === 'pass') {
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.14), m('#e8c84e', { side: THREE.DoubleSide, roughness: 0.6 }));
+    card.rotation.x = -0.7; card.position.y = 0.3; g.add(card);
+  } else if (kind === 'book') {
+    const cover = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.3, 0.07), m('#7a3a34', { roughness: 0.7 }));
+    cover.position.y = 0.3; g.add(cover);
+    const pages = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.27, 0.06), m('#f2ead0'));
+    pages.position.set(0.01, 0.3, 0.005); g.add(pages);
+  } else if (kind === 'roach') {
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), m('#3a2a1a', { roughness: 0.6 }));
+    body.scale.set(1, 0.6, 1.5); body.position.y = 0.09; g.add(body);
+    for (const s of [-1, 1]) for (const zz of [-0.05, 0.03, 0.1]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.1, 5), m('#2a1a10'));
+      leg.position.set(s * 0.08, 0.05, zz); leg.rotation.z = s * 0.8; g.add(leg);
+    }
   } else {
     const b = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.06, 16), m('#d86a9a', { roughness: 0.7 }));
     b.position.y = 0.28; g.add(b);
@@ -683,6 +791,20 @@ function flyNote(fromId, toId, onLand) {
     new THREE.MeshStandardMaterial({ color: '#fdf7e3' }));
   scene.add(m);
   flights.push({ m, t: 0, a: a.group.position.clone().setY(1.35), b: new THREE.Vector3(d.x, 1.12, d.deskZ), onLand });
+}
+// a billowing cloud: cheats inside it never reach the teacher's cheat log
+function smokePuff(x, z) {
+  const g = new THREE.Group();
+  for (let i = 0; i < 6; i++) {
+    const s = new THREE.Mesh(new THREE.SphereGeometry(0.55 + Math.random() * 0.5, 12, 10),
+      new THREE.MeshStandardMaterial({ color: '#c8ccd4', roughness: 1, transparent: true, opacity: 0.55, depthWrite: false }));
+    s.position.set((Math.random() - 0.5) * 1.6, 0.5 + Math.random() * 1.1, (Math.random() - 0.5) * 1.6);
+    g.add(s);
+  }
+  g.position.set(x, 0, z);
+  g.scale.setScalar(0.3);
+  scene.add(g);
+  return g;
 }
 const bottleLabels = [];
 function bottleLabel(seat) {
@@ -798,8 +920,8 @@ canvas.addEventListener('click', () => {
 document.addEventListener('pointerlockchange', () => { S.locked = document.pointerLockElement === canvas; });
 addEventListener('mousemove', e => {
   if (!S.locked) return;
-  S.yaw -= e.movementX * 0.0024;
-  S.pitch = Math.max(-1.35, Math.min(1.35, S.pitch - e.movementY * 0.0022));
+  S.yaw -= e.movementX * 0.0027;
+  S.pitch = Math.max(-1.35, Math.min(1.35, S.pitch - e.movementY * 0.0025));
 });
 // drag fallback when pointer lock is unavailable
 let dragXY = null;
@@ -862,8 +984,9 @@ function toggleSeat() {
     S.standing = true;
     S.me.x = d.x; S.me.z = d.z + 1.0; S.vx = 0; S.vz = 0;
     act('stand');
+    if (S.hasPass) { S.hasPass = false; S.net.send('usePass', {}); }
+    else toast('🪑 you are OUT OF YOUR SEAT — the teacher can accuse you on sight!', 'red');
     show('sheet', false);
-    toast('🪑 you are OUT OF YOUR SEAT — the teacher can accuse you on sight!', 'red');
   } else if (Math.hypot(S.me.x - d.x, S.me.z - (d.z + 0.15)) < 1.5) {
     S.standing = false;
     S.me.x = d.x; S.me.z = d.z + 0.15; S.me.walk = 0; S.vx = 0; S.vz = 0;
@@ -986,16 +1109,32 @@ function computePrompt() {
           break;
         }
       }
-      // carrying the whoopee cushion → hide it on the floor
-      if (!S.prompt && S.hasCushion) {
+      // carrying a deployable (cushion / smoke vial) → use it on the floor
+      if (!S.prompt && (S.hasCushion || S.hasSmoke)) {
         const hit = new THREE.Vector3();
         if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit) &&
             Math.abs(hit.x) < ROOM.x && Math.abs(hit.z) < ROOM.z &&
             hit.distanceTo(new THREE.Vector3(S.me.x, 0, S.me.z)) < 3) {
-          set('💨 CLICK — hide the whoopee cushion here', () => {
+          if (S.hasCushion) set('💨 CLICK — hide the whoopee cushion here', () => {
             S.net.send('trap', { id: 'tr-' + makeId().slice(0, 5), kind: 'cushion', pos: [hit.x, 0, hit.z] });
             S.hasCushion = false;
           });
+          else set('🌫 CLICK — smash the smoke vial here', () => {
+            S.net.send('smoke', { x: hit.x, z: hit.z });
+            S.hasSmoke = false;
+          });
+        }
+      }
+      // carrying the cockroach → release it near the teacher
+      if (!S.prompt && S.hasRoach && S.teacherId && S.teacherId !== S.myId) {
+        const tp = S.poses[S.teacherId];
+        if (tp && Math.hypot(tp.x - S.me.x, tp.z - S.me.z) < 3.5) {
+          const tf = S.figures[S.teacherId];
+          if (tf && ray.intersectObject(tf.mesh, true).length) {
+            set('🪳 CLICK — release the cockroach!', () => {
+              S.net.send('roach', { x: tp.x, z: tp.z }); S.hasRoach = false;
+            });
+          }
         }
       }
       // my bottle → rig / read
@@ -1028,27 +1167,34 @@ function frame(nowMs) {
   hostTick(dt);
   if (answersDirty && t > answersDirty) { answersDirty = 0; S.net && S.net.send('answers', { filled: S.answers[S.myId] }); }
 
-  // movement: WASD relative to look direction, normalized diagonals, and a
-  // short accelerate/brake so walking feels weighty instead of instant
+  // movement: Minecraft-flavoured — walk ~4.3 u/s, hold SHIFT to sprint with
+  // a smooth FOV kick, normalized diagonals, snappy accelerate/brake
+  S.sprinting = false;
   if (S.net && canWalk() && !S.expelled[S.myId] && t > S.stun && t > S.stuck) {
-    const sp = isTeacher() ? 3.5 : 3.2;
+    const sprint = S.keys.ShiftLeft || S.keys.ShiftRight;
+    const sp = (isTeacher() ? 4.4 : 4.2) * (sprint ? 1.35 : 1);
     let ix = 0, iz = 0;
     if (S.keys.KeyW) { ix -= Math.sin(S.yaw); iz -= Math.cos(S.yaw); }
     if (S.keys.KeyS) { ix += Math.sin(S.yaw); iz += Math.cos(S.yaw); }
     if (S.keys.KeyA) { ix -= Math.cos(S.yaw); iz += Math.sin(S.yaw); }
     if (S.keys.KeyD) { ix += Math.cos(S.yaw); iz -= Math.sin(S.yaw); }
     const il = Math.hypot(ix, iz);
-    const k = Math.min(1, dt * 14);
+    S.sprinting = !!(il && sprint);
+    const k = Math.min(1, dt * 20);
     S.vx += ((il ? ix / il * sp : 0) - S.vx) * k;
     S.vz += ((il ? iz / il * sp : 0) - S.vz) * k;
     if (Math.hypot(S.vx, S.vz) > 0.12) {
       S.me.x += S.vx * dt; S.me.z += S.vz * dt;
       const p = { x: S.me.x, z: S.me.z }; collide(p); S.me.x = p.x; S.me.z = p.z;
       S.me.yaw = Math.atan2(-S.vx, -S.vz) + Math.PI;   // avatar faces where it walks
+      S.bobPh = (S.bobPh || 0) + Math.hypot(S.vx, S.vz) * dt * 1.9;
     } else { S.vx = 0; S.vz = 0; }
     S.me.walk = il ? 1 : 0;
     if (t > S.poseAt) { S.poseAt = t + 0.11; S.net.send('pose', { x: S.me.x, z: S.me.z, yaw: S.yaw, walk: S.me.walk }); }
   }
+  // sprint FOV kick eases in and out
+  const kick = S.sprinting ? 11 : 0;
+  if (Math.abs(fovKick - kick) > 0.2) { fovKick += (kick - fovKick) * Math.min(1, dt * 7); applyFov(); }
 
   // figures
   for (const p of (S.roster || [])) {
@@ -1070,7 +1216,7 @@ function frame(nowMs) {
     } else if (pose && pose.x !== undefined) {
       f.group.position.y = 0;
       f.setPos(pose.x, pose.z, pose.yaw || 0);
-      if (pose.walk) { S.walkPh[p.id] = (S.walkPh[p.id] || 0) + dt * 7; f.walk(S.walkPh[p.id]); }
+      if (pose.walk) { S.walkPh[p.id] = (S.walkPh[p.id] || 0) + dt * 8.5; f.walk(S.walkPh[p.id]); }
       else f.stand();
     }
     f.idle(t); f.tickGesture(t);
@@ -1082,15 +1228,20 @@ function frame(nowMs) {
     camera.position.set(Math.sin(a) * 9, 4.6, Math.cos(a) * 9);
     camera.lookAt(0, 1.0, -1);
   } else {
-    let ex, ey, ez;
+    let ex, ey, ez, roll = 0;
     if (S.expelled[S.myId]) { ex = STOOL.x; ey = 1.42; ez = STOOL.z; }
-    else if (canWalk()) { ex = S.me.x; ey = 1.42; ez = S.me.z; }
-    else { const d = DESKS[mySeat() ?? 0]; ex = d.x; ey = 1.38; ez = d.z + 0.15; }
+    else if (canWalk()) {
+      // Minecraft-style view bob while moving
+      const spd = Math.min(1, Math.hypot(S.vx, S.vz) / 3.5);
+      ex = S.me.x; ey = 1.42 + Math.sin((S.bobPh || 0) * 2) * 0.021 * spd; ez = S.me.z;
+      roll = Math.sin(S.bobPh || 0) * 0.0045 * spd;
+    } else { const d = DESKS[mySeat() ?? 0]; ex = d.x; ey = 1.38; ez = d.z + 0.15; }
     camera.position.set(ex, ey, ez);
     camera.rotation.set(0, 0, 0, 'YXZ');
     camera.rotation.order = 'YXZ';
     camera.rotation.y = S.yaw;
     camera.rotation.x = S.pitch;
+    camera.rotation.z = roll;
     computePrompt();
   }
 
@@ -1109,7 +1260,11 @@ function frame(nowMs) {
   if (['prep', 'inspect', 'exam'].includes(S.phase)) {
     const left = Math.max(0, (S.phaseEnds - Date.now()) / 1000);
     $('phaseTimer').textContent = `${(left / 60) | 0}:${String((left % 60) | 0).padStart(2, '0')}`;
-  } else $('phaseTimer').textContent = '–:––';
+    // last 30 seconds of the exam: pulse red + a one-time warning
+    const urgent = S.phase === 'exam' && left <= 30 && left > 0;
+    $('phaseTimer').classList.toggle('urgent', urgent);
+    if (urgent && !S.warned30) { S.warned30 = true; banner('⏰ 30 SECONDS LEFT — fill every answer!', 2600); sfx.bell(); }
+  } else { $('phaseTimer').textContent = '–:––'; $('phaseTimer').classList.remove('urgent'); }
   if (isTeacher()) {
     $('authFill').firstElementChild.style.width = S.authority + '%';
     $('inspFill').firstElementChild.style.width = S.inspection + '%';
@@ -1123,6 +1278,16 @@ function frame(nowMs) {
     for (const ch of it.mesh.children)
       if (!ch.userData.halo) ch.position.y = ch.userData.baseY + Math.sin(t * 2.4 + it.mesh.position.x) * 0.045;
   }
+  // smoke clouds billow up, drift, then thin out and vanish
+  for (let i = S.smokes.length - 1; i >= 0; i--) {
+    const s = S.smokes[i];
+    const age = t - s.born, left = s.until - t;
+    if (left <= -0.5) { scene.remove(s.mesh); S.smokes.splice(i, 1); continue; }
+    s.mesh.scale.setScalar(Math.min(1, 0.3 + age * 1.1));
+    s.mesh.rotation.y += dt * 0.35;
+    const op = Math.max(0, Math.min(0.55, left * 0.7));
+    for (const ch of s.mesh.children) ch.material.opacity = op;
+  }
 
   // tension chips: "out of seat" reminder + teacher-proximity warning
   const inDanger = !isTeacher() && S.phase === 'exam' && !S.expelled[S.myId] && mySeat() != null;
@@ -1135,26 +1300,51 @@ function frame(nowMs) {
 requestAnimationFrame(frame);
 
 // ---------------------------------------------------------------- results
+let resultTimers = [];
 function showResults(data) {
   S.phase = 'results';
   sfx.stopRing();
   document.exitPointerLock && document.exitPointerLock();
+  ['viewer', 'scrib', 'help', 'howto'].forEach(i => show(i, false));   // clear any leftover popup
+  resultTimers.forEach(clearTimeout); resultTimers = [];
   const iWin = isTeacher() ? !data.pass : data.pass;
-  $('resultTitle').textContent = data.pass ? '🎉 THE CLASS PASSES!' : '💀 THE CLASS FAILS!';
-  $('avgLine').textContent =
-    (data.reason === 'principal' ? 'The principal fired the teacher! ' :
-     data.reason === 'expelled' ? 'Everyone got expelled! ' : '') +
-    `Class average: ${Math.round(data.avg * 100)}% (needed ${PASS * 100}%)`;
+  // count the round once, locally, for the menu stats line
+  if (!S.roundCounted) { S.roundCounted = true; profile.addRound(iWin); refreshWho(); }
+
+  // the ceremony builds suspense: title + rows reveal one-by-one on a drumroll,
+  // scores tick up, then the verdict lands
+  $('resultTitle').textContent = '📊 GRADING…';
+  $('resultTitle').style.color = '#ffd76a';
+  $('avgLine').textContent = 'The teacher is marking the papers…';
   const rows = $('resultsRows'); rows.innerHTML = '';
-  for (const r of data.rows) {
-    const d = document.createElement('div');
-    d.innerHTML = `<span>${r.crown ? '👑 ' : ''}${r.name}${r.id === S.myId ? ' (you)' : ''}</span>
-      <span class="val">${r.expelled ? 'EXPELLED' : Math.round(r.score / N_QUESTIONS * 100) + '%'}</span>`;
-    rows.appendChild(d);
-  }
-  (iWin ? sfx.win : sfx.lose).call(sfx);
   ['sheet', 'teachBar', 'hotbar', 'crosshair', 'prompt', 'helpTip'].forEach(i => show(i, false));
   show('results', true);
+
+  const list = data.rows;
+  list.forEach((r, i) => {
+    const d = document.createElement('div');
+    d.style.opacity = 0; d.style.transition = 'opacity .3s, transform .3s'; d.style.transform = 'translateY(8px)';
+    d.innerHTML = `<span>${r.crown ? '👑 ' : ''}${r.name}${r.id === S.myId ? ' (you)' : ''}</span>
+      <span class="val">…</span>`;
+    rows.appendChild(d);
+    resultTimers.push(setTimeout(() => {
+      d.style.opacity = 1; d.style.transform = 'none';
+      d.querySelector('.val').textContent = r.expelled ? 'EXPELLED' : Math.round(r.score / N_QUESTIONS * 100) + '%';
+      sfx.tap(0.8);
+      if (r.crown) sfx.learn();
+    }, 500 + i * 500));
+  });
+
+  // final verdict after every paper is shown
+  resultTimers.push(setTimeout(() => {
+    $('resultTitle').textContent = data.pass ? '🎉 THE CLASS PASSES!' : '💀 THE CLASS FAILS!';
+    $('resultTitle').style.color = data.pass ? '#8fd39e' : '#e07a6a';
+    $('avgLine').textContent =
+      (data.reason === 'principal' ? 'The principal fired the teacher! ' :
+       data.reason === 'expelled' ? 'Everyone got expelled! ' : '') +
+      `Class average: ${Math.round(data.avg * 100)}% (needed ${PASS * 100}%)`;
+    (iWin ? sfx.win : sfx.lose).call(sfx);
+  }, 600 + list.length * 500));
 }
 
 // ---------------------------------------------------------------- boot + test hooks
@@ -1168,7 +1358,9 @@ window.__game = {
       answers: S.answers[S.myId], strikes: { ...S.strikes }, expelled: { ...S.expelled },
       authority: S.authority, inspection: S.inspection, traps: S.traps.size, notes: S.notes.size,
       prompt: S.prompt && S.prompt.text, isHost: S.net ? S.net.isHost() : false, country: S.exam && S.exam.country,
-      standing: S.standing, items: S.items.size, hasMirror: S.hasMirror, hasCushion: S.hasCushion };
+      standing: S.standing, items: S.items.size, hasMirror: S.hasMirror, hasCushion: S.hasCushion,
+      hasSmoke: S.hasSmoke, hasPass: S.hasPass, hasRoach: S.hasRoach, smokes: S.smokes.length,
+      map: room.mapId, diff: S.diff };
   },
   skipPhase() { if (S.net && S.net.isHost()) S.phaseEnds = 0; },
   look(yaw, pitch) { S.yaw = yaw; S.pitch = pitch || 0; },

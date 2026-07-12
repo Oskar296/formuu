@@ -18,8 +18,10 @@ function load() {
   if (!P || typeof P !== 'object') P = {};
   P.name = P.name || '';
   if (!COLORS.some(c => c.id === P.color)) P.color = COLORS[(Math.random() * COLORS.length) | 0].id;
-  P.fov = Math.round(+P.fov);
-  if (!(P.fov >= 60 && P.fov <= 110)) P.fov = 85;
+  // fovH is the HORIZONTAL field of view — the vertical one is derived from
+  // the window shape so the world never looks zoomed-in on narrow screens
+  P.fovH = Math.round(+P.fovH);
+  if (!(P.fovH >= 70 && P.fovH <= 130)) P.fovH = 103;
   return P;
 }
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(P)); } catch { /* private mode */ } };
@@ -29,6 +31,8 @@ export const profile = {
   set name(v) { load().name = String(v).slice(0, 14); save(); },
   get color() { return load().color; },
   set color(v) { if (COLORS.some(c => c.id === v)) { load().color = v; save(); } },
-  get fov() { return load().fov; },
-  set fov(v) { v = Math.round(+v); if (v >= 60 && v <= 110) { load().fov = v; save(); } },
+  get fovH() { return load().fovH; },
+  set fovH(v) { v = Math.round(+v); if (v >= 70 && v <= 130) { load().fovH = v; save(); } },
+  get stats() { const p = load(); return { rounds: p.rounds | 0, wins: p.wins | 0 }; },
+  addRound(win) { const p = load(); p.rounds = (p.rounds | 0) + 1; if (win) p.wins = (p.wins | 0) + 1; save(); },
 };

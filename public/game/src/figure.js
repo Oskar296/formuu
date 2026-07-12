@@ -26,8 +26,8 @@ function bodySDF(x, y, z) {
   let d = sdEll(x, y, z, 0, 1.19, 0, 0.185, 0.20, 0.162);            // chest
   d = smin(d, sdEll(x, y, z, 0, 0.97, 0, 0.19, 0.20, 0.172), 0.16);  // belly
   d = smin(d, sdEll(x, y, z, 0, 0.79, 0, 0.185, 0.155, 0.165), 0.14); // hips (same width)
-  d = smin(d, sdSeg(x, y, z, 0, 1.29, 0, 0, 1.43, 0, 0.105, 0.09), 0.09);  // neck
-  d = smin(d, sdEll(x, y, z, 0, 1.56, 0, 0.183, 0.226, 0.18), 0.055);       // egg head
+  d = smin(d, sdSeg(x, y, z, 0, 1.29, 0, 0, 1.44, 0, 0.095, 0.078), 0.08);  // neck (thinner)
+  d = smin(d, sdEll(x, y, z, 0, 1.575, 0, 0.195, 0.205, 0.195), 0.045);      // round ball head
   for (const s of [-1, 1]) {
     d = smin(d, sdSeg(x, y, z, s * 0.225, 1.25, 0, s * 0.325, 0.80, 0, 0.068, 0.055), 0.055); // arm
     d = smin(d, sdEll(x, y, z, s * 0.332, 0.725, 0, 0.062, 0.092, 0.044), 0.034);              // hand nub

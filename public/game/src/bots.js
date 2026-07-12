@@ -55,12 +55,12 @@ export class BotBrain {
           b.planted = true;
           const kinds = ['marbles', 'glue', 'pepper', 'clock'];
           const kind = kinds[(Math.random() * kinds.length) | 0];
-          const px = (Math.random() * 2 - 1) * 3, pz = -3 - Math.random() * 3;
+          const px = (Math.random() * 2 - 1) * ROOM.x * 0.45, pz = -ROOM.z * 0.3 - Math.random() * ROOM.z * 0.35;
           this.net.sendAs(p.id, 'trap', { id: 'tr-' + Math.random().toString(36).slice(2, 7), kind, pos: [px, 0, pz] });
         }
       }
       const dx = b.wander.x - b.wx, dz = b.wander.z - b.wz, dist = Math.hypot(dx, dz);
-      if (dist > 0.05) { b.wx += dx / dist * Math.min(dist, 1.9 * dt); b.wz += dz / dist * Math.min(dist, 1.9 * dt); }
+      if (dist > 0.05) { b.wx += dx / dist * Math.min(dist, 2.6 * dt); b.wz += dz / dist * Math.min(dist, 2.6 * dt); }
       if (now > b.poseAt) { b.poseAt = now + 0.12; this.net.sendAs(p.id, 'pose', { x: b.wx, z: b.wz, yaw: Math.atan2(dx, dz) + Math.PI, walk: dist > 0.1 ? 1 : 0 }); }
       return;
     }
@@ -117,7 +117,7 @@ export class BotBrain {
     if (r.st === 'wait') {
       if (now > r.until) { r.st = 'back'; r.tx = d.x; r.tz = d.z + 0.7; }
     } else if (dist > 0.14) {
-      const sp = 2.0 * dt;
+      const sp = 2.8 * dt;
       b.wx += dx / dist * Math.min(dist, sp); b.wz += dz / dist * Math.min(dist, sp);
     } else if (r.st === 'go') {
       r.st = 'wait'; r.until = now + 1.4 + Math.random();
@@ -137,9 +137,10 @@ export class BotBrain {
   teacher(p, now, dt) {
     const S = this.S;
     const tb = this.tb || (this.tb = { x: TEACHER_DESK.x, z: TEACHER_DESK.z + 1.3, yaw: 0, wp: 0, poseAt: 0, busyUntil: 0 });
+    const wx = ROOM.x - 2.6, wz = ROOM.z - 3.6;   // patrol scales with the map
     const WAY = [
-      { x: -4.5, z: -4.5 }, { x: 4.5, z: -4.5 }, { x: 4.5, z: 0 }, { x: -4.5, z: 0 },
-      { x: -4.5, z: 4.5 }, { x: 4.5, z: 4.5 }, { x: 0, z: -4 },
+      { x: -wx, z: -wz }, { x: wx, z: -wz }, { x: wx, z: 0 }, { x: -wx, z: 0 },
+      { x: -wx, z: wz }, { x: wx, z: wz }, { x: 0, z: -wz * 0.9 },
     ];
     if (S.phase !== 'exam' && S.phase !== 'inspect') return;
     let goal = WAY[tb.wp];
@@ -154,20 +155,22 @@ export class BotBrain {
     } else if (Math.hypot(tb.x - goal.x, tb.z - goal.z) < 0.4) tb.wp = (tb.wp + 1) % WAY.length;
     const dx = goal.x - tb.x, dz = goal.z - tb.z, dist = Math.hypot(dx, dz);
     if (dist > 0.05) {
-      tb.x += dx / dist * Math.min(dist, 2.1 * dt); tb.z += dz / dist * Math.min(dist, 2.1 * dt);
+      tb.x += dx / dist * Math.min(dist, 3.1 * dt); tb.z += dz / dist * Math.min(dist, 3.1 * dt);
       tb.yaw = Math.atan2(dx, dz) + Math.PI;
     }
     this.pose(p, tb, now, dist > 0.1 ? 1 : 0);
-    // accuse: any student with a live cheat in the log, close by, cooldown gated
+    // accuse: any student with a live cheat in the log, close by, cooldown gated.
+    // Difficulty scales the eyesight range and the odds of pouncing.
+    const D = { chill: { r: 2.6, p: 0.28 }, normal: { r: 3.4, p: 0.55 }, hawk: { r: 5.2, p: 0.9 } }[S.diff || 'normal'];
     if (S.phase === 'exam' && now - S.lastAccuseAt >= S.ACCUSE_CD) {
       for (const q of S.roster) {
         if (q.role !== 'student' || S.expelled[q.id]) continue;
         const seat = S.seats[q.id]; if (seat == null) continue;
         // wanderers are judged where they actually ARE, not at their desk
         const loc = (S.standingSet[q.id] && (q.id === S.myId ? S.me : S.poses[q.id])) || DESKS[seat];
-        if (Math.hypot(tb.x - loc.x, tb.z - loc.z) > 3.4) continue;
+        if (Math.hypot(tb.x - loc.x, tb.z - loc.z) > D.r) continue;
         const hit = S.cheatLog.some(a => a.pid === q.id && a.until >= now && !a.riot);
-        if (hit && Math.random() < 0.55) { this.net.sendAs(p.id, 'accuse', { target: q.id }); break; }
+        if (hit && Math.random() < D.p) { this.net.sendAs(p.id, 'accuse', { target: q.id }); break; }
       }
     }
   }
