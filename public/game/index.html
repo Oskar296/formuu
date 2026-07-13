@@ -171,8 +171,15 @@
     max-width: 92vw; }
   #viewerTitle { font-size: 14.5px; margin-bottom: 10px; max-width: 460px; line-height: 1.4; }
   #viewerImg { background: #f6f1e0; border-radius: 8px; max-width: min(440px, 88vw); }
-  #viewerClose { margin-top: 12px; padding: 9px 26px; border-radius: 9px; border: none;
+  #viewerClose, #viewerCopy { margin-top: 12px; padding: 9px 22px; border-radius: 9px; border: none;
     background: linear-gradient(120deg, #e0b64e, #d68a3f); color: #241a08; font-weight: 800; }
+  #viewerCopy { background: linear-gradient(120deg, #8fd39e, #5aa86b); color: #12210f; margin-right: 8px; }
+  #scribStampHint { font-size: 10.5px; opacity: .55; margin-top: 8px; }
+  #scribStamps { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin-top: 5px; }
+  .stamp { font-size: 11px; padding: 5px 0; border-radius: 7px; border: 1px solid #4a5270;
+    background: #171b26; color: #cfd3e0; cursor: pointer; text-align: center; font-weight: 700; line-height: 1.2; }
+  .stamp .qn { font-size: 8.5px; opacity: .6; display: block; }
+  .stamp.set { background: #3a6a4a; border-color: #6ac98a; color: #eafff0; }
 
   #soundBtn { position: fixed; top: 12px; right: 12px; z-index: 45; background: rgba(23,27,38,.9);
     border: 1px solid #3a4156; border-radius: 10px; padding: 6px 10px; font-size: 15px; color: #fff; }
@@ -301,13 +308,6 @@
   <div id="dutyLine"></div>
 </div>
 
-<div class="hud hidden" id="hotbar">
-  <div class="slot" data-i="0"><span class="k">1</span>🔮<span class="nm">marbles</span></div>
-  <div class="slot" data-i="1"><span class="k">2</span>🍯<span class="nm">glue</span></div>
-  <div class="slot" data-i="2"><span class="k">3</span>🌶<span class="nm">pepper</span></div>
-  <div class="slot" data-i="3"><span class="k">4</span>⏰<span class="nm">clock</span></div>
-  <div class="slot" data-i="4"><span class="k">5</span>📝<span class="nm">note</span></div>
-</div>
 
 <!-- HELP -->
 <div id="help" class="hidden">
@@ -316,14 +316,13 @@
     <div><b>mouse</b> look around (click once to grab)</div>
     <div><b>WASD</b> walk (prep / teacher / out of seat) &nbsp;·&nbsp; <b>SHIFT</b> sprint</div>
     <div><b>Z</b> hold to zoom in &nbsp;·&nbsp; <b>X</b> hold to zoom out (wider view)</div>
-    <div><b>E / click</b> use what you're looking at</div>
-    <div><b>SPACE</b> leave / retake your seat mid-exam (risky!)</div>
-    <div><b>N</b> draw a note, then click a classmate to throw</div>
-    <div><b>1–4</b> hold up finger signals</div>
-    <div><b>F</b> flash your sheet &nbsp;·&nbsp; <b>T</b> tap &nbsp;·&nbsp; <b>C</b> cough</div>
-    <div><b>V</b> your arm ink &nbsp;·&nbsp; <b>R</b> raise hand</div>
+    <div><b>E / click</b> use / draw on what you're looking at</div>
+    <div><b>M</b> toggle third-person &nbsp;·&nbsp; <b>SPACE</b> leave / retake your seat</div>
     <div><b>TAB</b> show/hide your exam paper</div>
-    <div style="opacity:.75;font-size:12.5px">✨ rare items (🪞 📜 💨) appear when the exam starts — walk over and grab them</div>
+    <div style="margin-top:6px;color:#ffd76a;font-weight:700">✍️ CHEATING IS FREEFORM — you draw it:</div>
+    <div style="font-size:12.5px;line-height:1.7">Aim at a <b>classmate</b> to pass a note, your <b>desk</b> to leave one, your <b>bottle</b> to label it, or walk to the <b>board</b> to write big. Draw anything — and stamp the answers you want to share so they can copy them. Aim at any cheat to <b>read</b> it.</div>
+    <div style="font-size:12.5px">🛠 In prep, aim at the <b>clock / door / teacher's chair / floor</b> to rig a distraction — when it fires, cheat freely.</div>
+    <div style="opacity:.75;font-size:12px">👀 peek a neighbour's paper · ✨ grab rare items (🪞 📜 💨 🌫 🎫 📖 🪳)</div>
     <div style="opacity:.6;font-size:12px;margin-top:6px">press H to close</div>
   </div>
 </div>
@@ -331,8 +330,10 @@
 <!-- SCRIBBLER -->
 <div id="scrib" class="hidden">
   <div id="scribCard">
-    <div style="font-size:14px;margin-bottom:8px" id="scribTitle">✍️ Draw your note — anything goes</div>
+    <div style="font-size:14px;margin-bottom:8px" id="scribTitle">✍️ Draw anything — this is YOUR cheat</div>
     <canvas id="scribCanvas" width="360" height="240"></canvas>
+    <div id="scribStampHint">tap a question to stamp an answer you want to share (tap again to change)</div>
+    <div id="scribStamps"></div>
     <div id="scribRow">
       <button id="scribClear">Clear</button>
       <button id="scribCancel">Cancel</button>
@@ -346,7 +347,8 @@
   <div id="viewerCard">
     <div id="viewerTitle"></div>
     <img id="viewerImg" alt="note">
-    <br><button id="viewerClose">OK</button>
+    <br><button id="viewerCopy" class="hidden">📋 Copy answers</button>
+    <button id="viewerClose">OK</button>
   </div>
 </div>
 

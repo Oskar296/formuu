@@ -185,7 +185,7 @@ export function makeFigure(scene, { color = '#eef0f2', name = '', tag = null, sc
   }
   scene.add(g);
 
-  const zero = () => { for (const k in B) { B[k].rotation.set(0, 0, 0); } mesh.position.y = 0; };
+  const zero = () => { for (const k in B) { B[k].rotation.set(0, 0, 0); } mesh.position.set(0, 0, 0); };
   let gesture = null, gestureUntil = 0;
 
   const fig = {
@@ -193,18 +193,35 @@ export function makeFigure(scene, { color = '#eef0f2', name = '', tag = null, sc
     setColor(c) { mat.color.set(c); },
     setPos(x, z, yaw) { g.position.x = x; g.position.z = z; g.rotation.y = yaw; },
     stand() { zero(); },
-    // natural walk cycle: knee bend on recovery, arm counter-swing, lean + bob
+    // natural gait: hips swing, knees flex through the lift/recovery phase,
+    // arms counter-swing with a forearm bend that grows at the extremes, the
+    // spine counter-rotates the hips, and the body bobs twice + sways once per
+    // stride. amp (driven by speed) turns a stroll into a run.
     walk(ph, amp = 1) {
       const swL = Math.sin(ph), swR = Math.sin(ph + Math.PI);
-      B.legLu.rotation.x = swL * 0.5 * amp; B.legRu.rotation.x = swR * 0.5 * amp;
-      B.legLf.rotation.x = Math.max(0, -Math.sin(ph - 0.5)) * 0.75 * amp + 0.05;
-      B.legRf.rotation.x = Math.max(0, -Math.sin(ph + Math.PI - 0.5)) * 0.75 * amp + 0.05;
-      B.armLu.rotation.x = -swL * 0.38 * amp; B.armRu.rotation.x = -swR * 0.38 * amp;
-      B.armLf.rotation.x = B.armRf.rotation.x = -0.15 * amp;
-      B.spine.rotation.x = 0.06 * amp;
-      B.spine.rotation.y = Math.sin(ph) * 0.06 * amp;
-      B.head.rotation.x = -0.06 * amp;
-      mesh.position.y = Math.abs(Math.sin(ph)) * 0.02 * amp;
+      // upper legs: forward reach / backward push
+      B.legLu.rotation.x = swL * 0.62 * amp;
+      B.legRu.rotation.x = swR * 0.62 * amp;
+      // knees: bend most as the foot lifts off and swings under the body
+      const knee = (s) => { const k = Math.max(0, -Math.sin(s - 0.7)); return (k * k * 1.15 + 0.06) * amp; };
+      B.legLf.rotation.x = knee(ph);
+      B.legRf.rotation.x = knee(ph + Math.PI);
+      // arms swing opposite the legs; forearms bend most at the swing extremes
+      B.armLu.rotation.x = -swL * 0.5 * amp;
+      B.armRu.rotation.x = -swR * 0.5 * amp;
+      B.armLf.rotation.x = -(0.2 + Math.abs(swL) * 0.35) * amp;
+      B.armRf.rotation.x = -(0.2 + Math.abs(swR) * 0.35) * amp;
+      // torso: slight forward lean, counter-rotate the hips, tiny sag-and-rise
+      B.spine.rotation.x = 0.09 * amp;
+      B.spine.rotation.y = -Math.sin(ph) * 0.12 * amp;
+      B.spine.rotation.z = Math.sin(ph) * 0.04 * amp;
+      B.pelvis.rotation.y = Math.sin(ph) * 0.1 * amp;
+      // head stays roughly level against the torso lean
+      B.head.rotation.x = -0.05 * amp;
+      B.head.rotation.y = Math.sin(ph) * 0.06 * amp;
+      // vertical bob twice per stride + a gentle lateral sway once per stride
+      mesh.position.y = (Math.abs(Math.sin(ph)) - 0.5) * 0.05 * amp;
+      mesh.position.x = Math.sin(ph) * 0.025 * amp;
     },
     // seated at a desk: butt on the chair seat, thighs sloping under the desk,
     // shins near vertical so nothing pokes through chair or desktop

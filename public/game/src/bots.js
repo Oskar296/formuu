@@ -4,7 +4,16 @@
 // The teacher bot patrols, does duties, and accuses cheats it can see.
 
 import { DESKS, TEACHER_DESK, BOARD, ROOM } from './classroom.js';
-import { N_QUESTIONS } from './exam.js';
+import { N_QUESTIONS, LETTERS } from './exam.js';
+
+// draw a little answer note the human can actually read + copy
+function answerNote(marks) {
+  const cv = document.createElement('canvas'); cv.width = 200; cv.height = 130;
+  const c = cv.getContext('2d'); c.fillStyle = '#f6f1e0'; c.fillRect(0, 0, 200, 130);
+  c.fillStyle = '#1c4a2a'; c.font = 'bold 26px system-ui'; c.textAlign = 'center';
+  marks.forEach((m, i) => c.fillText(`Q${m.q + 1} = ${LETTERS[m.a]}`, 100, 46 + i * 42));
+  return cv.toDataURL('image/png');
+}
 
 export const BOT_NAMES = ['Mia', 'Leo', 'Ava', 'Max', 'Zoe', 'Sam', 'Ivy', 'Kai', 'Nia', 'Ben', 'Uma', 'Rex'];
 const BOT_COLORS = ['red', 'blue', 'green', 'pink', 'orange', 'yellow', 'purple', 'brown', 'cyan', 'lime', 'black'];
@@ -51,7 +60,7 @@ export class BotBrain {
       if (b.wx === 0 && b.wz === 0) { b.wx = d.x; b.wz = d.z + 1; }
       if (!b.wander || Math.hypot(b.wander.x - b.wx, b.wander.z - b.wz) < 0.3) {
         b.wander = { x: (Math.random() * 2 - 1) * (ROOM.x - 1), z: (Math.random() * 2 - 1) * (ROOM.z - 1.5) };
-        if (!b.planted && Math.random() < 0.5) {
+        if (!b.planted && Math.random() < 0.3) {
           b.planted = true;
           const kinds = ['marbles', 'glue', 'pepper', 'clock'];
           const kind = kinds[(Math.random() * kinds.length) | 0];
@@ -79,33 +88,33 @@ export class BotBrain {
         this.net.sendAs(p.id, 'answers', { filled: ans.slice() });
       }
     }
-    // visible, catchable cheats — gives the teacher prey
+    // cheats — bots now pass REAL answers around (with marks) so the human can
+    // copy them, ink peekable answers, sneak over to peek, and make catchable noise
     b.nextAct -= dt;
     if (b.nextAct <= 0) {
-      b.nextAct = 3.5 + Math.random() * 5;
-      const roll = Math.random();
+      b.nextAct = 3.0 + Math.random() * 4;
       const nb = S.roster.filter(x => x.role === 'student' && x.id !== p.id && S.seats[x.id] != null && !S.expelled[x.id]);
+      const human = nb.find(x => !x.bot);
       const target = nb.length ? nb[(Math.random() * nb.length) | 0] : null;
-      if (roll < 0.3 && target) this.net.sendAs(p.id, 'act', { type: 'peek', target: target.id });
-      else if (roll < 0.5 && target) this.net.sendAs(p.id, 'act', { type: 'flash' });
-      else if (roll < 0.62) this.net.sendAs(p.id, 'act', { type: 'signal', n: 1 + (Math.random() * 4 | 0) });
-      else if (roll < 0.75 && target) {
-        const cv = document.createElement('canvas'); cv.width = 180; cv.height = 120;
-        const c = cv.getContext('2d');
-        c.fillStyle = '#f6f1e0'; c.fillRect(0, 0, 180, 120);
-        c.fillStyle = '#2a2a3a'; c.font = 'bold 60px system-ui'; c.textAlign = 'center';
-        c.fillText(['?', 'B!', '3=C', 'idk', ':)'][Math.random() * 5 | 0], 90, 78);
-        this.net.sendAs(p.id, 'throw', { id: 'nt-' + Math.random().toString(36).slice(2, 7), to: target.id, img: cv.toDataURL('image/png') });
-      }
-      else if (roll < 0.82 && target && S.seats[target.id] != null) {
-        // leave the seat and sneak over to a classmate's desk
+      const known = [];
+      for (let q = 0; q < N_QUESTIONS; q++) if (ans[q] === S.exam.questions[q].correct) known.push(q);
+      const roll = Math.random();
+      if (known.length && (human || target) && roll < 0.5) {
+        // pass a real note (1-2 answers) — prefer the human so solo isn't hollow
+        const to = human && Math.random() < 0.72 ? human : target;
+        const qs = known.slice().sort(() => Math.random() - 0.5).slice(0, 1 + (Math.random() < 0.4 ? 1 : 0));
+        const marks = qs.map(q => ({ q, a: S.exam.questions[q].correct }));
+        this.net.sendAs(p.id, 'throw', { id: 'nt-' + Math.random().toString(36).slice(2, 7), to: to.id, img: answerNote(marks), marks });
+      } else if (known.length && roll < 0.64) {
+        const q = known[(Math.random() * known.length) | 0], mk = [{ q, a: S.exam.questions[q].correct }];
+        this.net.sendAs(p.id, 'attach', { slot: 'arm', img: answerNote(mk), marks: mk });
+      } else if (roll < 0.8 && target) this.net.sendAs(p.id, 'act', { type: 'peek', target: target.id });
+      else if (roll < 0.9 && target && S.seats[target.id] != null) {
         const td = DESKS[S.seats[target.id]];
         b.wx = d.x; b.wz = d.z + 1.0;
         b.roam = { st: 'go', tx: td.x + (d.x < td.x ? -0.95 : 0.95), tz: td.z + 0.2, victim: target.id };
         this.net.sendAs(p.id, 'act', { type: 'stand' });
-      }
-      else if (roll < 0.9) this.net.sendAs(p.id, 'act', { type: 'cough' });
-      else this.net.sendAs(p.id, 'act', { type: 'tap' });
+      } else this.net.sendAs(p.id, 'act', { type: Math.random() < 0.5 ? 'cough' : 'tap' });
     }
   }
 
@@ -162,7 +171,7 @@ export class BotBrain {
     // accuse: any student with a live cheat in the log, close by, cooldown gated.
     // Difficulty scales the eyesight range and the odds of pouncing.
     const D = { chill: { r: 2.6, p: 0.28 }, normal: { r: 3.4, p: 0.55 }, hawk: { r: 5.2, p: 0.9 } }[S.diff || 'normal'];
-    if (S.phase === 'exam' && now - S.lastAccuseAt >= S.ACCUSE_CD) {
+    if (S.phase === 'exam' && now - S.lastAccuseAt >= S.ACCUSE_CD && now >= (S.windowUntil || 0)) {
       for (const q of S.roster) {
         if (q.role !== 'student' || S.expelled[q.id]) continue;
         const seat = S.seats[q.id]; if (seat == null) continue;

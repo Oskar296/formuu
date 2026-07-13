@@ -77,16 +77,16 @@ const S = {
   seats: {}, teacherId: null, exam: null, knowledge: {}, answers: {},
   strikes: {}, expelled: {}, authority: 100, inspection: 100,
   duty: null, nextDutyAt: 0, riotUntil: 0, lastAccuseAt: -99, ACCUSE_CD,
-  cheatLog: [], figures: {}, poses: {}, walkPh: {}, leanUntil: {},
+  cheatLog: [], figures: {}, poses: {}, walkPh: {}, lastPos: {}, leanUntil: {},
   traps: new Map(), notes: new Map(),   // notes: stuck under desks AND landed on desks
   items: new Map(),                     // rare cheat items spawned around the room
   standing: false, standingSet: {}, lastOOS: {}, hasMirror: false, hasCushion: false,
-  hasSmoke: false, hasPass: false, hasRoach: false, smokes: [], passUntil: {},
-  attach: {}, myTrapUsed: false, myNoteUsed: false,
+  hasSmoke: false, hasPass: false, hasRoach: false, smokes: [], passUntil: {}, board: null,
+  attach: {}, myTrapUsed: false,
   me: { x: 4, z: 6, yaw: Math.PI, walk: 0 }, vx: 0, vz: 0, stun: 0, stuck: 0, keys: {},
-  yaw: Math.PI, pitch: 0, locked: false,
-  hotSel: -1, armedThrow: null, sheetOpen: true,
-  poseAt: 0, resultsSent: false, handLure: null, ringingUntil: 0, ringingId: null,
+  yaw: Math.PI, pitch: 0, locked: false, tp: false, headPt: new THREE.Vector3(),
+  sheetOpen: true,
+  poseAt: 0, resultsSent: false, handLure: null, ringingUntil: 0, ringingId: null, windowUntil: 0,
   prompt: null,   // {text, run} — current crosshair action
 };
 const isTeacher = () => S.myRole === 'teacher';
@@ -96,7 +96,6 @@ const mySeat = () => S.seats[S.myId];
 const inRiot = () => now() < S.riotUntil;
 const ringing = () => now() < S.ringingUntil;
 const bots = new BotBrain(S, null);
-const HOT = ['marbles', 'glue', 'pepper', 'clock', 'note'];
 
 // ---------------------------------------------------------------- hud helpers
 function toast(msg, cls = '') {
@@ -108,10 +107,17 @@ function toast(msg, cls = '') {
 }
 let bannerT = 0;
 function banner(msg, ms = 2600) { const b = $('banner'); b.textContent = msg; b.style.opacity = 1; clearTimeout(bannerT); bannerT = setTimeout(() => (b.style.opacity = 0), ms); }
-function viewer(title, img) {
+function viewer(title, img, marks) {
   // free the mouse so the pop-up can actually be closed while pointer-locked
   document.exitPointerLock && document.exitPointerLock();
-  $('viewerTitle').textContent = title; $('viewerImg').src = img; $('viewer').classList.remove('hidden');
+  $('viewerTitle').textContent = title; $('viewerImg').src = img;
+  const cp = $('viewerCopy'), has = marks && marks.length && !isTeacher() && mySeat() != null && !S.expelled[S.myId];
+  cp.classList.toggle('hidden', !has);
+  if (has) {
+    cp.textContent = `📋 Copy ${marks.length} answer${marks.length > 1 ? 's' : ''}`;
+    cp.onclick = () => { marks.forEach(m => setAnswer(m.q, m.a)); toast(`✅ copied ${marks.length} answer${marks.length > 1 ? 's' : ''} to your sheet`, 'gold'); sfx.learn(); $('viewer').classList.add('hidden'); };
+  }
+  $('viewer').classList.remove('hidden');
 }
 $('viewerClose').onclick = () => $('viewer').classList.add('hidden');
 $('viewer').addEventListener('pointerup', e => { if (e.target.id === 'viewer') $('viewer').classList.add('hidden'); });
@@ -260,8 +266,10 @@ function hostPhase(phase) {
   }
   if (phase === 'exam') {
     S.nextDutyAt = now() + (14 + Math.random() * 10) / TSCALE;
+    // every rigged distraction fires at a staggered random time during the
+    // exam (so the cheat window is guaranteed, not dependent on the teacher)
     for (const tr of S.traps.values())
-      if (tr.kind === 'clock' && tr.armed) tr.ringAt = now() + (0.25 + Math.random() * 0.5) * DUR.exam / TSCALE;
+      if (tr.armed) tr.ringAt = now() + (0.12 + Math.random() * 0.7) * DUR.exam / TSCALE;
     // rare cheat items appear around the room — you must LEAVE YOUR SEAT to
     // grab one. Each map has its own pool (lab: smoke vial, gym: hall pass)
     const rx = ROOM.x - 2.0, rz = ROOM.z - 1.2;
@@ -308,9 +316,10 @@ function hostTick(dt) {
   const tp = S.poses[S.teacherId] || (S.teacherId === S.myId ? S.me : null);
   for (const tr of S.traps.values()) {
     if (!tr.armed) continue;
-    if (tr.kind !== 'clock' && tp &&
-      Math.hypot(tp.x - tr.pos[0], tp.z - tr.pos[2]) < 0.8) S.net.send('trapFire', { id: tr.id });
-    else if (tr.kind === 'clock' && tr.ringAt && t >= tr.ringAt) S.net.send('trapFire', { id: tr.id });
+    // fire on the teacher stepping on it OR when its timer comes up
+    const prox = tr.kind !== 'clock' && tp && Math.hypot(tp.x - tr.pos[0], tp.z - tr.pos[2]) < 0.9;
+    const timer = tr.ringAt && t >= tr.ringAt;
+    if (prox || timer) S.net.send('trapFire', { id: tr.id });
   }
   if (S.ringingId && t > S.ringingUntil) S.net.send('trapGone', { id: S.ringingId });
   if (S.authority <= 0 && !inRiot()) S.net.send('meters', { authority: 55, inspection: S.inspection });
@@ -358,8 +367,18 @@ function inSmoke(pid) {
   if (px == null) return false;
   return S.smokes.some(s => s.until > t && Math.hypot(s.x - px, s.z - pz) < 2.8);
 }
+const inWindow = () => now() < S.windowUntil;   // a distraction is covering the class
+const WINDOW_SECS = { clock: 9, cushion: 6, marbles: 5, glue: 5, pepper: 5 };
+function openCheatWindow(sec, kind, who) {
+  S.windowUntil = Math.max(S.windowUntil, now() + sec);
+  if (kind === 'clock') S.ringingUntil = Math.max(S.ringingUntil, now() + sec);
+  const label = { clock: '⏰ ALARM GOING OFF', cushion: '💨 PFFFRT!', marbles: '💫 MARBLES!', glue: '🍯 GLUED DOWN', pepper: '🤧 PEPPER CLOUD' }[kind] || '🎯 CHAOS';
+  banner(isTeacher() ? `${label} — WHO DID THIS?!` : `🎯 CHEAT WINDOW — nobody's watching!`, Math.min(4000, sec * 1000));
+  const v = $('riotVignette'); v.style.opacity = 0.65; setTimeout(() => (v.style.opacity = 0), Math.min(sec, 5) * 1000);
+  if (!isTeacher()) sfx.learn();
+}
 function logCheat(pid, kind, img) {
-  if (ringing() || inSmoke(pid)) return;   // cover noise / cover smoke
+  if (ringing() || inWindow() || inSmoke(pid)) return;   // cover noise / distraction / smoke
   S.cheatLog.push({ pid, kind, img, until: now() + CATCH_WINDOW, riot: inRiot() });
   if (S.cheatLog.length > 300) S.cheatLog.splice(0, 150);
 }
@@ -387,14 +406,16 @@ function onEvent(ev) {
     case 'trap': {
       if (S.traps.has(data.id)) break;
       S.traps.set(data.id, { ...data, mesh: trapMesh(data.kind, data.pos), armed: true, owner: from });
-      if (from === S.myId) { S.myTrapUsed = true; S.hotSel = -1; refreshHotbar(); toast(`${TRAP_ICON[data.kind]} planted`); }
+      if (from === S.myId) toast(`${TRAP_ICON[data.kind] || '🛠'} rigged`);
       break;
     }
     case 'stick': {
       if (S.notes.has(data.id)) break;
       const d = DESKS[data.desk];
-      S.notes.set(data.id, { ...data, kind: 'stuck', mesh: noteMesh([d.x + 0.45, 0.99, d.deskZ + 0.28], true), owner: from });
-      if (from === S.myId) { S.myNoteUsed = true; S.hotSel = -1; refreshHotbar(); toast('📝 note hidden under the desk'); }
+      const pos = [d.x + (Math.random() - 0.5) * 0.5, 1.115, d.deskZ + (Math.random() - 0.5) * 0.3];
+      S.notes.set(data.id, { ...data, kind: 'landed', mesh: noteMesh(pos, false), owner: from });
+      capDeskNotes(data.desk);
+      if (from === S.myId) toast('📝 note left on your desk');
       break;
     }
     case 'throw': {
@@ -407,18 +428,27 @@ function onEvent(ev) {
         if (targetSeat == null || S.notes.has(data.id)) return;
         const d = DESKS[targetSeat];
         const pos = [d.x + (Math.random() - 0.5) * 0.6, 1.115, d.deskZ + (Math.random() - 0.5) * 0.3];
-        S.notes.set(data.id, { id: data.id, img: data.img, desk: targetSeat, kind: 'landed', mesh: noteMesh(pos, false), owner: from });
-        if (data.to === S.myId) toast('🗒 a note landed on your desk — look at it', 'gold');
+        S.notes.set(data.id, { id: data.id, img: data.img, marks: data.marks, desk: targetSeat, kind: 'landed', mesh: noteMesh(pos, false), owner: from });
+        capDeskNotes(targetSeat);
+        if (data.to === S.myId) toast('🗒 a note landed on your desk — read it!', 'gold');
       });
       break;
     }
     case 'attach': {
-      (S.attach[from] = S.attach[from] || {})[data.slot] = data.img;
+      (S.attach[from] = S.attach[from] || {})[data.slot] = { img: data.img, marks: data.marks };
       logCheat(from, data.slot === 'arm' ? 'inking their arm' : 'rigging a bottle');
       if (data.slot === 'arm' && S.figures[from]) S.figures[from].inkArm();   // visible to everyone
       if (data.slot === 'bottle' && S.seats[from] != null) bottleLabel(S.seats[from]);
-      if (from === S.myId) toast(data.slot === 'arm' ? '💪 ink dried on your arm' : '🍼 bottle label applied');
+      if (from === S.myId) toast(data.slot === 'arm' ? '💪 ink dried on your arm' : '🍼 bottle labelled');
       gesture(from, data.slot === 'arm' ? '✍️ scribbles on arm' : '🍼 fiddles with bottle');
+      break;
+    }
+    case 'board': {
+      S.board = { img: data.img, marks: data.marks, owner: from };
+      boardWrite(data.img);
+      logCheat(from, 'writing on the board');
+      if (from === S.myId) toast('🖊 written on the board — everyone can read it!');
+      else gesture(from, '🖊 writes on the board');
       break;
     }
     case 'itemSpawn': {
@@ -532,26 +562,20 @@ function onEvent(ev) {
       const tv = volAt(tr.pos[0], tr.pos[2]);
       if (tr.kind === 'marbles') {
         sfx.crash(tv); removeTrap(data.id);
-        if (isTeacher()) { S.stun = now() + 2.2; banner('💫 MARBLES! WHO PUT MARBLES THERE?!'); }
-        else banner(`💫 The teacher slipped on ${who}'s marbles!`);
+        if (isTeacher()) S.stun = now() + 2.2;
       } else if (tr.kind === 'glue') {
         sfx.squelch(tv); removeTrap(data.id);
-        if (isTeacher()) { S.stuck = now() + 2.6; banner('🍯 YOUR SHOES ARE GLUED DOWN'); }
-        else banner(`🍯 The teacher stepped in ${who}'s glue!`);
+        if (isTeacher()) S.stuck = now() + 2.6;
       } else if (tr.kind === 'pepper') {
         sfx.sneeze(tv); removeTrap(data.id);
-        if (isTeacher()) { blind(2.6); banner('🤧 A PEPPER ERASER?! I CANNOT SEE!'); }
-        else banner(`🤧 ${who}'s pepper eraser goes off!`);
+        if (isTeacher()) blind(2.6);
       } else if (tr.kind === 'clock') {
-        S.ringingUntil = now() + 10; S.ringingId = data.id;
-        sfx.startRing('clock');
-        banner(isTeacher() ? '⏰ WHERE IS THAT RINGING?! Find it!' : '⏰ COVER NOISE — cheat freely!', 3000);
+        S.ringingId = data.id; sfx.startRing('clock');
       } else if (tr.kind === 'cushion') {
-        sfx.honk(volAt(tr.pos[0], tr.pos[2])); removeTrap(data.id);
-        S.ringingUntil = Math.max(S.ringingUntil, now() + 6);   // the class is in stitches — cover noise
-        banner(isTeacher() ? '💨 WHO PUT A WHOOPEE CUSHION THERE?!' : `💨 PFFFRT! ${nameOf(tr.owner)}'s cushion — cheat freely!`, 3000);
-        sfx.laugh();
+        sfx.honk(tv); removeTrap(data.id); sfx.laugh();
       }
+      // EVERY distraction opens a loud CHEAT WINDOW — nothing can be caught
+      openCheatWindow(WINDOW_SECS[tr.kind] || 5, tr.kind, who);
       break;
     }
     case 'trapGone': {
@@ -564,7 +588,7 @@ function onEvent(ev) {
       const n = S.notes.get(data.id);
       if (n) {
         scene.remove(n.mesh); S.notes.delete(data.id);
-        if (data.readAloud) { viewer(`📢 CONFISCATED — ${nameOf(n.owner)}'s note, read to the class:`, n.img); sfx.laugh(); }
+        if (data.readAloud) { viewer(`📢 CONFISCATED — ${nameOf(n.owner)}'s note, read to the class:`, n.img, n.marks); sfx.laugh(); }
       }
       break;
     }
@@ -593,18 +617,13 @@ function handleAct(from, a) {
       break;
     case 'peek': logCheat(from, 'peeking');
       S.leanUntil[from] = { until: now() + 1.6, dir: a.dir || 1 };
-      if (from === S.myId && a.target) viewer(`👀 You peek at ${nameOf(a.target)}'s paper…`, sheetImage(nameOf(a.target), S.answers[a.target]));
-      break;
-    case 'flash': logCheat(from, 'flashing their sheet');
-      if (S.figures[from]) S.figures[from].holdPaper(2.2, now());
-      if (from !== S.myId && !isTeacher() && mySeat() != null && S.seats[from] != null && seatAdjacent(S.seats[from], mySeat()))
-        viewer(`📄 ${nameOf(from)} flashes their sheet!`, sheetImage(nameOf(from), S.answers[from]));
+      if (from === S.myId && a.target) viewer(`👀 ${nameOf(a.target)}'s paper — copy what they've got:`, sheetImage(nameOf(a.target), S.answers[a.target]), answerMarks(a.target));
       break;
     case 'readArm': logCheat(from, 'reading their arm'); gesture(from, '🧐 checks sleeve');
-      if (from === S.myId && (S.attach[from] || {}).arm) viewer('💪 Your arm says:', S.attach[from].arm);
+      if (from === S.myId && (S.attach[from] || {}).arm) viewer('💪 Your arm says:', S.attach[from].arm.img, S.attach[from].arm.marks);
       break;
     case 'readBottle': logCheat(from, 'reading a bottle label'); gesture(from, '🥤 loooong sip');
-      if (from === S.myId && (S.attach[from] || {}).bottle) viewer('🍼 Your bottle label:', S.attach[from].bottle);
+      if (from === S.myId && (S.attach[from] || {}).bottle) viewer('🍼 Your bottle label:', S.attach[from].bottle.img, S.attach[from].bottle.marks);
       break;
     case 'readNote': logCheat(from, 'reading a hidden note'); gesture(from, '🤫 reaches under the desk'); break;
     case 'tap': sfx.tap(volFor(from)); logBurst(from, 'tapping in code'); gesture(from, '👇 tap'); break;
@@ -639,13 +658,14 @@ function startRound(data) {
   S.seed = data.seed; S.seats = data.seats; S.teacherId = data.teacherId;
   S.diff = data.diff || 'normal'; S.roundCounted = false; S.warned30 = false;
   if (room.mapId !== (data.map || 'classroom')) { room = buildWorld(scene, data.map || 'classroom'); applyEnv(room.mapId); }
+  buildRigSpots();
   S.exam = generateExam(data.seed);
   S.answers = {}; S.strikes = {}; S.expelled = {}; S.knowledge = {};
   S.authority = 100; S.inspection = 100; S.duty = null; S.riotUntil = 0;
-  S.cheatLog = []; S.resultsSent = false; S.attach = {};
-  S.myTrapUsed = false; S.myNoteUsed = false; S.lastAccuseAt = -99;
-  S.stun = 0; S.stuck = 0; S.ringingId = null; S.ringingUntil = 0;
-  S.hotSel = -1; S.armedThrow = null; S.sheetOpen = true;
+  S.cheatLog = []; S.resultsSent = false; S.attach = {}; S.board = null;
+  S.myTrapUsed = false; S.lastAccuseAt = -99;
+  S.stun = 0; S.stuck = 0; S.ringingId = null; S.ringingUntil = 0; S.windowUntil = 0;
+  S.sheetOpen = true;
   S.standing = false; S.standingSet = {}; S.lastOOS = {};
   S.hasMirror = false; S.hasCushion = false; S.vx = 0; S.vz = 0;
   S.hasSmoke = false; S.hasPass = false; S.hasRoach = false; S.passUntil = {};
@@ -664,7 +684,7 @@ function startRound(data) {
     if (p.id === S.teacherId) fig.setPos(TEACHER_DESK.x, TEACHER_DESK.z + 1.3, 0);
     else { const d = DESKS[S.seats[p.id]]; fig.setPos(d.x, d.z + 0.9, Math.PI); }
     if (p.id === S.myId) {
-      fig.setVisible(false);   // first person — you ARE the figure
+      fig.setVisible(S.tp);   // hidden in first person, shown in third person
       if (isTeacher()) { S.me.x = TEACHER_DESK.x; S.me.z = TEACHER_DESK.z + 1.3; S.yaw = Math.PI; } // face the class
       else { const d = DESKS[S.seats[p.id]]; S.me.x = d.x; S.me.z = d.z + 0.9; S.yaw = 0; }         // face the board
       S.pitch = 0;
@@ -676,24 +696,24 @@ function startRound(data) {
 }
 function clearRound(alsoUI = true) {
   for (const id in S.figures) S.figures[id].dispose();
-  S.figures = {}; S.poses = {}; S.walkPh = {}; S.leanUntil = {};
+  S.figures = {}; S.poses = {}; S.walkPh = {}; S.lastPos = {}; S.leanUntil = {};
   for (const tr of S.traps.values()) scene.remove(tr.mesh);
   for (const n of S.notes.values()) scene.remove(n.mesh);
   for (const it of S.items.values()) scene.remove(it.mesh);
   for (const s of S.smokes) scene.remove(s.mesh);
   S.traps.clear(); S.notes.clear(); S.items.clear(); S.smokes.length = 0;
-  clearBottleLabels();
+  clearBottleLabels(); clearBoard();
   sfx.stopRing();
-  if (alsoUI) ['sheet', 'teachBar', 'hotbar', 'crosshair', 'prompt', 'helpTip'].forEach(i => show(i, false));
+  if (alsoUI) ['sheet', 'teachBar', 'crosshair', 'prompt', 'helpTip'].forEach(i => show(i, false));
 }
 function setPhase(phase, endsAt) {
   S.phase = phase; S.phaseEnds = endsAt;
   show('lobby', false);
   const stud = !isTeacher();
-  show('hotbar', phase === 'prep' && stud && mySeat() != null);
   show('sheet', stud && phase === 'exam' && mySeat() != null && S.sheetOpen);
   show('teachBar', isTeacher() && (phase === 'inspect' || phase === 'exam'));
   show('crosshair', true); show('helpTip', true);
+  showRigSpots(phase === 'prep' && stud);
   $('phaseLabel').textContent = phase === 'prep' ? 'PREP — RIG THE ROOM' : phase === 'inspect' ? 'INSPECTION' : phase === 'exam' ? 'THE EXAM — DO NOT GET CAUGHT' : phase.toUpperCase();
   if (phase === 'inspect' || phase === 'exam') sfx.bell();
   if (phase === 'exam') {
@@ -702,7 +722,6 @@ function setPhase(phase, endsAt) {
     if (stud && S.sheetOpen && mySeat() != null) document.exitPointerLock && document.exitPointerLock();
   }
   if (phase === 'prep') banner(`${MAPS[room.mapId].icon} ${MAPS[room.mapId].name} — ` + (stud ? '🛠 RIG THE ROOM before the teacher arrives!' : '👀 the class is up to something…'), 3200);
-  refreshHotbar();
 }
 
 // ---------------------------------------------------------------- world objects
@@ -800,6 +819,44 @@ function noteMesh(pos, underDesk) {
   return g;
 }
 function removeTrap(id) { const tr = S.traps.get(id); if (tr) { scene.remove(tr.mesh); S.traps.delete(id); } }
+// keep at most a few notes on one desk so they don't pile up forever
+function capDeskNotes(desk, max = 4) {
+  const ns = [...S.notes.entries()].filter(([, n]) => n.desk === desk);
+  while (ns.length > max) { const [id, n] = ns.shift(); scene.remove(n.mesh); S.notes.delete(id); }
+}
+
+// riggable world objects — during prep a student aims at one of these glowing
+// spots to arm a distraction (no menu). Each maps to an existing trap effect.
+let rigSpots = [];
+function buildRigSpots() {
+  for (const s of rigSpots) if (s.mesh) scene.remove(s.mesh);
+  rigSpots = [
+    { kind: 'clock', label: 'the clock', pos: [BOARD.x + 4.6, 3.4, -ROOM.z - 0.32] },
+    { kind: 'marbles', label: 'the floor', pos: [0, 0.08, -ROOM.z + 2.7] },
+    { kind: 'pepper', label: 'the door', pos: [ROOM.x - 0.15, 1.2, ROOM.z * 0.66] },
+    { kind: 'glue', label: "the teacher's chair", pos: [TEACHER_DESK.x, 0.62, TEACHER_DESK.z + 0.95] },
+  ];
+  for (const s of rigSpots) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 10),
+      new THREE.MeshBasicMaterial({ color: '#ffd76a', transparent: true, opacity: 0.3, depthWrite: false }));
+    m.position.set(s.pos[0], s.pos[1], s.pos[2]); m.visible = false;
+    scene.add(m); s.mesh = m; s.used = false;
+  }
+}
+function showRigSpots(on) { for (const s of rigSpots) if (s.mesh) s.mesh.visible = on && !s.used; }
+function armPrompt(set) {
+  for (const s of rigSpots) {
+    if (s.used || !s.mesh) continue;
+    const h = ray.intersectObject(s.mesh, true);
+    if (h.length && h[0].distance < 5) {
+      set(`🛠 CLICK — rig ${s.label} (a distraction to cheat under)`, () => {
+        s.used = true; s.mesh.visible = false;
+        S.net.send('trap', { id: 'tr-' + makeId().slice(0, 5), kind: s.kind, pos: s.pos });
+      });
+      return;
+    }
+  }
+}
 const flights = [];
 function flyNote(fromId, toId, onLand) {
   const a = S.figures[fromId], seat = S.seats[toId];
@@ -835,6 +892,25 @@ function bottleLabel(seat) {
   bottleLabels.push({ seat, label });
 }
 function clearBottleLabels() { for (const l of bottleLabels) l.label.parent?.remove(l.label); bottleLabels.length = 0; }
+// the answers a player currently holds, as copyable marks
+function answerMarks(pid) {
+  const a = S.answers[pid] || [];
+  const out = [];
+  for (let q = 0; q < N_QUESTIONS; q++) if (a[q] != null) out.push({ q, a: a[q] });
+  return out;
+}
+// a drawing pinned to the classroom board for the whole room to read
+let boardMesh = null;
+function boardWrite(img) {
+  if (boardMesh) { scene.remove(boardMesh); boardMesh = null; }
+  const tx = new THREE.TextureLoader().load(img);
+  tx.colorSpace = THREE.SRGBColorSpace;
+  boardMesh = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.6),
+    new THREE.MeshBasicMaterial({ map: tx, transparent: true }));
+  boardMesh.position.set(BOARD.x, 2.15, -ROOM.z - 0.36);
+  scene.add(boardMesh);
+}
+function clearBoard() { if (boardMesh) { scene.remove(boardMesh); boardMesh = null; } S.board = null; }
 function gesture(pid, text, bg) { const f = S.figures[pid]; if (f) f.setGesture(text, 2.2, now(), bg); }
 function blind(sec) {
   const el = document.createElement('div');
@@ -895,7 +971,10 @@ function setAnswer(q, a, sync = true) {
 }
 
 // ---------------------------------------------------------------- scribbler
-let scribCb = null, drawing = false;
+// Freeform cheat authoring: draw ANYTHING, and stamp the answers you want to
+// share (Q# = letter). Returns { img, marks:[{q,a}] } — marks are what a
+// reader can one-tap copy onto their own sheet. Wrong stamps = decoys.
+let scribCb = null, drawing = false, scribMarks = {};
 {
   const cv = $('scribCanvas'), c = cv.getContext('2d');
   const reset = () => { c.fillStyle = '#f6f1e0'; c.fillRect(0, 0, cv.width, cv.height); c.strokeStyle = '#22283a'; c.lineWidth = 4; c.lineCap = 'round'; };
@@ -906,26 +985,29 @@ let scribCb = null, drawing = false;
   addEventListener('pointerup', () => (drawing = false));
   $('scribClear').onclick = reset;
   $('scribCancel').onclick = () => { show('scrib', false); scribCb = null; };
-  $('scribOk').onclick = () => { const img = cv.toDataURL('image/png'); show('scrib', false); reset(); const cb = scribCb; scribCb = null; cb && cb(img); };
+  $('scribOk').onclick = () => {
+    const marks = Object.keys(scribMarks).map(q => ({ q: +q, a: scribMarks[q] }));
+    if (marks.length) {   // burn the stamps into the drawing so it's readable as an image too
+      c.fillStyle = 'rgba(246,241,224,0.92)'; c.fillRect(0, 0, cv.width, 30);
+      c.fillStyle = '#1c4a2a'; c.font = 'bold 18px system-ui'; c.textAlign = 'left'; c.textBaseline = 'middle';
+      c.fillText(marks.map(m => `Q${m.q + 1}=${LETTERS[m.a]}`).join('  '), 8, 15);
+    }
+    const img = cv.toDataURL('image/png');
+    show('scrib', false); reset();
+    const cb = scribCb; scribCb = null; cb && cb({ img, marks });
+  };
 }
 function openScribbler(title, cb) {
   document.exitPointerLock && document.exitPointerLock();
-  $('scribTitle').textContent = title; scribCb = cb; show('scrib', true);
-}
-
-// ---------------------------------------------------------------- hotbar
-function refreshHotbar() {
-  [...$('hotbar').children].forEach((el, i) => {
-    el.classList.toggle('sel', S.hotSel === i);
-    el.classList.toggle('used', i < 4 ? S.myTrapUsed : S.myNoteUsed);
-  });
-}
-[...$('hotbar').children].forEach((el, i) => (el.onclick = () => selectHot(i)));
-function selectHot(i) {
-  if (S.phase !== 'prep') return;
-  if ((i < 4 && S.myTrapUsed) || (i === 4 && S.myNoteUsed)) return;
-  S.hotSel = S.hotSel === i ? -1 : i;
-  refreshHotbar();
+  $('scribTitle').textContent = title; scribCb = cb; scribMarks = {};
+  const box = $('scribStamps'); box.innerHTML = '';
+  for (let q = 0; q < N_QUESTIONS; q++) {
+    const el = document.createElement('div'); el.className = 'stamp';
+    const paint = () => { const a = scribMarks[q]; el.classList.toggle('set', a != null); el.innerHTML = `<span class="qn">Q${q + 1}</span>${a == null ? '—' : LETTERS[a]}`; };
+    el.onclick = () => { const cur = scribMarks[q]; const nx = cur == null ? 0 : cur + 1; if (nx > 3) delete scribMarks[q]; else scribMarks[q] = nx; paint(); };
+    paint(); box.appendChild(el);
+  }
+  show('scrib', true);
 }
 
 // ---------------------------------------------------------------- pointer-lock look (Minecraft style)
@@ -970,19 +1052,14 @@ addEventListener('keydown', e => {
   }
   if (e.code === 'Tab') { e.preventDefault(); if (S.phase === 'exam' && !isTeacher() && mySeat() != null) setSheet(!S.sheetOpen); }
   if (e.code === 'KeyH') $('help').classList.remove('hidden');
-  const k = e.key;
-  if (S.phase === 'prep' && !isTeacher() && '12345'.includes(k)) selectHot(+k - 1);
-  if (S.phase === 'exam' && !isTeacher() && !S.expelled[S.myId] && mySeat() != null) {
-    if (e.code === 'Space') { e.preventDefault(); toggleSeat(); }
-    if ('1234'.includes(k)) act('signal', { n: +k });
-    if (e.code === 'KeyN') $('scrib').classList.contains('hidden') && openScribbler('✍️ Draw your note — then LOOK at a classmate and click to throw', img => { S.armedThrow = img; toast('🎯 look at a classmate and click'); });
-    if (e.code === 'KeyF') act('flash');
-    if (e.code === 'KeyT') act('tap');
-    if (e.code === 'KeyC') act('cough');
-    if (e.code === 'KeyR') act('raise');
-    if (e.code === 'KeyV') { if ((S.attach[S.myId] || {}).arm) act('readArm'); else openScribbler('💪 Ink a cheat on your ARM (visible on your body!)', img => S.net.send('attach', { slot: 'arm', img })); }
-    if (e.code === 'KeyE' && S.prompt) S.prompt.run();
-  } else if (e.code === 'KeyE' && S.prompt) S.prompt.run();
+  if (e.code === 'KeyM' && ['prep', 'inspect', 'exam'].includes(S.phase)) {
+    S.tp = !S.tp;
+    const me = S.figures[S.myId]; if (me) me.setVisible(S.tp);
+    toast(S.tp ? '🎥 third person' : '🎥 first person');
+  }
+  // seat toggle mid-exam; everything else is aim-driven (E / click)
+  if (e.code === 'Space' && S.phase === 'exam' && !isTeacher() && !S.expelled[S.myId] && mySeat() != null) { e.preventDefault(); toggleSeat(); }
+  if (e.code === 'KeyE' && S.prompt) S.prompt.run();
 });
 addEventListener('keyup', e => (S.keys[e.code] = false));
 addEventListener('pointerup', e => {
@@ -1019,7 +1096,11 @@ const ray = new THREE.Raycaster();
 function computePrompt() {
   S.prompt = null;
   if (!['prep', 'inspect', 'exam'].includes(S.phase)) { show('prompt', false); return; }
-  ray.setFromCamera(new THREE.Vector2(0, 0), camera);
+  if (S.tp) {
+    // aim from the head along the look direction (the camera is behind you)
+    const cy = Math.cos(S.yaw), sy = Math.sin(S.yaw), cp = Math.cos(S.pitch);
+    ray.set(S.headPt, new THREE.Vector3(-sy * cp, Math.sin(S.pitch), -cy * cp).normalize());
+  } else ray.setFromCamera(new THREE.Vector2(0, 0), camera);
   const t = now();
   const seat = mySeat();
   const set = (text, run) => (S.prompt = { text, run });
@@ -1054,118 +1135,90 @@ function computePrompt() {
         }
       }
     }
-  } else if (S.phase === 'prep' && seat != null) {
-    if (S.hotSel === 4) {
-      const h = ray.intersectObjects(room.surfaces.map(s => s.mesh));
-      if (h.length && h[0].distance < 3.2) {
-        const desk = room.surfaces.find(s => s.mesh === h[0].object).desk;
-        set('📝 CLICK — hide a note under this desk', () => {
-          openScribbler('📝 Draw the note to hide under this desk', img => S.net.send('stick', { id: 'nt-' + makeId().slice(0, 5), desk, img }));
-        });
-      }
-    } else if (S.hotSel >= 0) {
+  } else if (!isTeacher() && seat != null && !S.expelled[S.myId]) {
+    // FREEFORM CHEATING: aim at a thing → draw on it, or read what's on it.
+    const exam = S.phase === 'exam';
+    const draw = (title, ev) => openScribbler(title, p => S.net.send(ev.type, { ...ev.data, img: p.img, marks: p.marks }));
+    // 1) read any cheat note you can reach (yours anytime; others' while roaming)
+    for (const [id, n] of S.notes) {
+      const h = ray.intersectObject(n.mesh, true);
+      if (!h.length) continue;
+      const mine = n.desk === seat;
+      if (mine ? h[0].distance > 2.8 : !(S.standing && h[0].distance < 2.4)) continue;
+      set(mine ? '🗒 CLICK — read the note on your desk' : `🕵️ CLICK — swipe ${nameOf(n.owner)}'s note`, () => {
+        act('readNote');
+        viewer(mine ? `🗒 Note from ${nameOf(n.owner)}:` : `🕵️ ${nameOf(n.owner)}'s note:`, n.img, n.marks);
+        S.net.send('noteGone', { id });   // reading consumes the note (declutter)
+      });
+      break;
+    }
+    // 2) trap-armable world objects during prep (aim + arm, no menu)
+    if (!S.prompt && S.phase === 'prep') armPrompt(set);
+    // 3) rare item on the floor → grab it (exam)
+    if (!S.prompt && exam) for (const [id, it] of S.items) {
+      const h = ray.intersectObject(it.mesh, true);
+      if (h.length && h[0].distance < 2.6) { set(`${ITEM_ICON[it.kind]} CLICK — grab the ${it.kind}`, () => S.net.send('itemGet', { id })); break; }
+    }
+    // 4) carrying a deployable (cushion / smoke) → floor
+    if (!S.prompt && exam && (S.hasCushion || S.hasSmoke)) {
       const hit = new THREE.Vector3();
       if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit) &&
-          Math.abs(hit.x) < ROOM.x && Math.abs(hit.z) < ROOM.z && hit.distanceTo(new THREE.Vector3(S.me.x, 0, S.me.z)) < 4.5) {
-        const kind = HOT[S.hotSel];
-        set(`${TRAP_ICON[kind]} CLICK — plant ${kind} here`, () => S.net.send('trap', { id: 'tr-' + makeId().slice(0, 5), kind, pos: [hit.x, 0, hit.z] }));
+          Math.abs(hit.x) < ROOM.x && Math.abs(hit.z) < ROOM.z && hit.distanceTo(new THREE.Vector3(S.me.x, 0, S.me.z)) < 3) {
+        if (S.hasCushion) set('💨 CLICK — hide the whoopee cushion here', () => { S.net.send('trap', { id: 'tr-' + makeId().slice(0, 5), kind: 'cushion', pos: [hit.x, 0, hit.z] }); S.hasCushion = false; });
+        else set('🌫 CLICK — smash the smoke vial here', () => { S.net.send('smoke', { x: hit.x, z: hit.z }); S.hasSmoke = false; });
       }
     }
-  } else if (S.phase === 'exam' && seat != null && !S.expelled[S.myId]) {
-    if (S.armedThrow) {
-      for (const p of students()) {
-        if (p.id === S.myId || S.expelled[p.id]) continue;
-        const f = S.figures[p.id]; if (!f) continue;
-        if (ray.intersectObject(f.mesh, true).length) {
-          const img = S.armedThrow;
-          set(`🗒 CLICK — throw the note to ${p.name}`, () => { S.net.send('throw', { id: 'nt-' + makeId().slice(0, 5), to: p.id, img }); S.armedThrow = null; });
-          break;
-        }
-      }
-      if (!S.prompt) set('🎯 aim at a classmate to throw (N redraws)', () => {});
-    } else {
-      // notes: read yours; while OUT OF YOUR SEAT you can swipe anyone's
-      for (const [id, n] of S.notes) {
-        const h = ray.intersectObject(n.mesh, true);
-        if (!h.length) continue;
-        const mine = n.desk === seat;
-        if (mine ? h[0].distance > 2.4 : !(S.standing && h[0].distance < 2.2)) continue;
-        set(mine ? (n.kind === 'landed' ? '🗒 CLICK — unfold the note' : '🤫 CLICK — read the hidden note')
-                 : '🕵️ CLICK — swipe the note off this desk', () => {
-          act('readNote');
-          viewer(mine ? (n.kind === 'landed' ? `🗒 The note from ${nameOf(n.owner)}:` : '🤫 The note under your desk:')
-                      : `🕵️ You swiped ${nameOf(n.owner)}'s note:`, n.img);
-          if (n.kind === 'landed' || !mine) S.net.send('noteGone', { id });
-        });
+    // 5) carrying the cockroach → release near the teacher
+    if (!S.prompt && exam && S.hasRoach && S.teacherId && S.teacherId !== S.myId) {
+      const tp = S.poses[S.teacherId], tf = S.figures[S.teacherId];
+      if (tp && tf && Math.hypot(tp.x - S.me.x, tp.z - S.me.z) < 3.5 && ray.intersectObject(tf.mesh, true).length)
+        set('🪳 CLICK — release the cockroach!', () => { S.net.send('roach', { x: tp.x, z: tp.z }); S.hasRoach = false; });
+    }
+    // 6) aim at a classmate → draw and pass them a note
+    if (!S.prompt && exam) for (const p of students()) {
+      if (p.id === S.myId || S.expelled[p.id]) continue;
+      const f = S.figures[p.id]; if (!f) continue;
+      const h = ray.intersectObject(f.mesh, true);
+      if (h.length && h[0].distance < (S.standing ? 6.5 : 4.4)) {
+        set(`✍️ CLICK — pass a note to ${p.name}`, () => draw(`✍️ Draw a note for ${p.name} — stamp the answers to share`, { type: 'throw', data: { id: 'nt-' + makeId().slice(0, 5), to: p.id } }));
         break;
       }
-      // a classmate's paper → peek. Adjacent from your seat; ANY desk you walk
-      // up to while standing; ANY desk from your seat with the 🪞 mirror
-      if (!S.prompt) {
-        const h = ray.intersectObjects(room.paperMeshes);
-        if (h.length) {
-          const deskIdx = room.paperMeshes.indexOf(h[0].object);
-          const owner = Object.keys(S.seats).find(pid => S.seats[pid] === deskIdx);
-          const dist = h[0].distance;
-          if (owner && owner !== S.myId) {
-            const near = S.standing ? dist < 2.8 : (seatAdjacent(deskIdx, seat) && dist < 3.4);
-            const mirror = !near && !S.standing && S.hasMirror && dist < 14;
-            if (near || mirror) {
-              const dir = DESKS[deskIdx].x > DESKS[seat].x ? 1 : -1;
-              set(`${mirror ? '🪞' : '👀'} CLICK — peek at ${nameOf(owner)}'s paper`, () => act('peek', { target: owner, dir }));
-            }
-          } else if (deskIdx === seat && !S.standing && dist < 3.4) {
-            set('📄 CLICK — ' + (S.sheetOpen ? 'put your paper down (TAB)' : 'pick up your paper (TAB)'),
-              () => setSheet(!S.sheetOpen));
-          }
-        }
-      }
-      // rare item on the floor → grab it (you'll have to leave your seat…)
-      if (!S.prompt) for (const [id, it] of S.items) {
-        const h = ray.intersectObject(it.mesh, true);
-        if (h.length && h[0].distance < 2.6) {
-          set(`${ITEM_ICON[it.kind]} CLICK — grab the ${it.kind}`, () => S.net.send('itemGet', { id }));
-          break;
-        }
-      }
-      // carrying a deployable (cushion / smoke vial) → use it on the floor
-      if (!S.prompt && (S.hasCushion || S.hasSmoke)) {
-        const hit = new THREE.Vector3();
-        if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit) &&
-            Math.abs(hit.x) < ROOM.x && Math.abs(hit.z) < ROOM.z &&
-            hit.distanceTo(new THREE.Vector3(S.me.x, 0, S.me.z)) < 3) {
-          if (S.hasCushion) set('💨 CLICK — hide the whoopee cushion here', () => {
-            S.net.send('trap', { id: 'tr-' + makeId().slice(0, 5), kind: 'cushion', pos: [hit.x, 0, hit.z] });
-            S.hasCushion = false;
-          });
-          else set('🌫 CLICK — smash the smoke vial here', () => {
-            S.net.send('smoke', { x: hit.x, z: hit.z });
-            S.hasSmoke = false;
-          });
-        }
-      }
-      // carrying the cockroach → release it near the teacher
-      if (!S.prompt && S.hasRoach && S.teacherId && S.teacherId !== S.myId) {
-        const tp = S.poses[S.teacherId];
-        if (tp && Math.hypot(tp.x - S.me.x, tp.z - S.me.z) < 3.5) {
-          const tf = S.figures[S.teacherId];
-          if (tf && ray.intersectObject(tf.mesh, true).length) {
-            set('🪳 CLICK — release the cockroach!', () => {
-              S.net.send('roach', { x: tp.x, z: tp.z }); S.hasRoach = false;
-            });
-          }
-        }
-      }
-      // my bottle → rig / read
-      if (!S.prompt) {
-        const mine = room.bottleMeshes[seat];
-        const h = mine ? ray.intersectObject(mine, true) : [];
-        if (h.length && h[0].distance < 2.4) {
-          if ((S.attach[S.myId] || {}).bottle) set('🍼 CLICK — take a long sip (read the label)', () => act('readBottle'));
-          else set('🍼 CLICK — rig your bottle label', () => openScribbler('🍼 Draw your bottle-label cheat', img => S.net.send('attach', { slot: 'bottle', img })));
+    }
+    // 7) a classmate's paper → peek (adjacent / standing / mirror)
+    if (!S.prompt && exam) {
+      const h = ray.intersectObjects(room.paperMeshes);
+      if (h.length) {
+        const deskIdx = room.paperMeshes.indexOf(h[0].object);
+        const owner = Object.keys(S.seats).find(pid => S.seats[pid] === deskIdx);
+        const dist = h[0].distance;
+        if (owner && owner !== S.myId) {
+          const near = S.standing ? dist < 2.8 : (seatAdjacent(deskIdx, seat) && dist < 3.4);
+          const mirror = !near && !S.standing && S.hasMirror && dist < 14;
+          if (near || mirror) { const dir = DESKS[deskIdx].x > DESKS[seat].x ? 1 : -1; set(`${mirror ? '🪞' : '👀'} CLICK — peek at ${nameOf(owner)}'s paper`, () => act('peek', { target: owner, dir })); }
+        } else if (deskIdx === seat && !S.standing && dist < 3.4) {
+          set('📄 CLICK — ' + (S.sheetOpen ? 'put your paper down (TAB)' : 'pick up your paper (TAB)'), () => setSheet(!S.sheetOpen));
         }
       }
     }
+    // 8) my bottle → label / read (from your seat)
+    if (!S.prompt && !S.standing) {
+      const mine = room.bottleMeshes[seat];
+      const h = mine ? ray.intersectObject(mine, true) : [];
+      if (h.length && h[0].distance < 2.6) {
+        if ((S.attach[S.myId] || {}).bottle) set('🍼 CLICK — read your bottle label', () => act('readBottle'));
+        else set('🍼 CLICK — draw a bottle-label cheat', () => draw('🍼 Draw on your bottle label', { type: 'attach', data: { slot: 'bottle' } }));
+      }
+    }
+    // 9) my desk surface → leave a note on it
+    if (!S.prompt && !S.standing) {
+      const surf = room.surfaces.find(s => s.desk === seat);
+      const h = surf ? ray.intersectObject(surf.mesh, true) : [];
+      if (h.length && h[0].distance < 2.8)
+        set('✍️ CLICK — write a note on your desk', () => draw('✍️ Draw a note to leave on your desk', { type: 'stick', data: { id: 'nt-' + makeId().slice(0, 5), desk: seat } }));
+    }
+    // 10) the board → write big for the whole room (walk up to it)
+    if (!S.prompt && (S.phase === 'prep' || S.standing) && Math.hypot(S.me.x - BOARD.x, S.me.z - BOARD.z) < 3.3)
+      set('🖊 CLICK — write on the board (the whole class can read it!)', () => draw('🖊 Draw on the board — big, bold and risky', { type: 'board', data: {} }));
   }
   if (S.prompt && S.prompt.text) { $('prompt').innerHTML = S.prompt.text.replace('CLICK', '<b>CLICK</b>'); show('prompt', true); }
   else show('prompt', false);
@@ -1242,8 +1295,17 @@ function frame(nowMs) {
     } else if (pose && pose.x !== undefined) {
       f.group.position.y = 0;
       f.setPos(pose.x, pose.z, pose.yaw || 0);
-      if (pose.walk) { S.walkPh[p.id] = (S.walkPh[p.id] || 0) + dt * 8.5; f.walk(S.walkPh[p.id]); }
-      else f.stand();
+      if (pose.walk) {
+        // gait speed: exact for me, estimated from motion for everyone else,
+        // so a stroll ambles and a sprint reads as a run
+        let spd;
+        if (p.id === S.myId) spd = Math.hypot(S.vx, S.vz);
+        else { const lp = S.lastPos[p.id]; spd = lp && dt > 0 ? Math.min(9, Math.hypot(pose.x - lp.x, pose.z - lp.z) / dt) : 3.4; }
+        const amp = Math.max(0.7, Math.min(1.5, spd / 3.6));
+        S.walkPh[p.id] = (S.walkPh[p.id] || 0) + dt * (5 + spd * 1.15);
+        f.walk(S.walkPh[p.id], amp);
+      } else f.stand();
+      if (p.id !== S.myId) S.lastPos[p.id] = { x: pose.x, z: pose.z };
     }
     f.idle(t); f.tickGesture(t);
   }
@@ -1254,20 +1316,32 @@ function frame(nowMs) {
     camera.position.set(Math.sin(a) * 9, 4.6, Math.cos(a) * 9);
     camera.lookAt(0, 1.0, -1);
   } else {
-    let ex, ey, ez, roll = 0;
-    if (S.expelled[S.myId]) { ex = STOOL.x; ey = 1.42; ez = STOOL.z; }
+    // eye point: where the player's head is
+    let hx, hy, hz, roll = 0;
+    if (S.expelled[S.myId]) { hx = STOOL.x; hy = 1.42; hz = STOOL.z; }
     else if (canWalk()) {
-      // Minecraft-style view bob while moving
       const spd = Math.min(1, Math.hypot(S.vx, S.vz) / 3.5);
-      ex = S.me.x; ey = 1.42 + Math.sin((S.bobPh || 0) * 2) * 0.021 * spd; ez = S.me.z;
-      roll = Math.sin(S.bobPh || 0) * 0.0045 * spd;
-    } else { const d = DESKS[mySeat() ?? 0]; ex = d.x; ey = 1.38; ez = d.z + 0.15; }
-    camera.position.set(ex, ey, ez);
-    camera.rotation.set(0, 0, 0, 'YXZ');
-    camera.rotation.order = 'YXZ';
-    camera.rotation.y = S.yaw;
-    camera.rotation.x = S.pitch;
-    camera.rotation.z = roll;
+      hx = S.me.x; hy = 1.42 + Math.sin((S.bobPh || 0) * 2) * 0.021 * spd * (S.tp ? 0 : 1); hz = S.me.z;
+      if (!S.tp) roll = Math.sin(S.bobPh || 0) * 0.0045 * spd;
+    } else { const d = DESKS[mySeat() ?? 0]; hx = d.x; hy = 1.38; hz = d.z + 0.15; }
+    S.headPt.set(hx, hy, hz);
+    if (S.tp) {
+      // orbit the camera behind and above the head, clamped inside the room
+      const cy = Math.cos(S.yaw), sy = Math.sin(S.yaw), cp = Math.cos(S.pitch);
+      const fwd = new THREE.Vector3(-sy * cp, Math.sin(S.pitch), -cy * cp);
+      let dist = 2.9;
+      const cx = () => hx - fwd.x * dist, cz = () => hz - fwd.z * dist;
+      while (dist > 0.9 && (Math.abs(cx()) > ROOM.x + 0.35 || Math.abs(cz()) > ROOM.z + 0.35)) dist -= 0.2;
+      camera.position.set(cx(), hy + 0.55 - fwd.y * dist, cz());
+      camera.lookAt(hx, hy + 0.15, hz);
+    } else {
+      camera.position.set(hx, hy, hz);
+      camera.rotation.set(0, 0, 0, 'YXZ');
+      camera.rotation.order = 'YXZ';
+      camera.rotation.y = S.yaw;
+      camera.rotation.x = S.pitch;
+      camera.rotation.z = roll;
+    }
     computePrompt();
   }
 
@@ -1343,7 +1417,7 @@ function showResults(data) {
   $('resultTitle').style.color = '#ffd76a';
   $('avgLine').textContent = 'The teacher is marking the papers…';
   const rows = $('resultsRows'); rows.innerHTML = '';
-  ['sheet', 'teachBar', 'hotbar', 'crosshair', 'prompt', 'helpTip'].forEach(i => show(i, false));
+  ['sheet', 'teachBar', 'crosshair', 'prompt', 'helpTip'].forEach(i => show(i, false));
   show('results', true);
 
   const list = data.rows;
@@ -1394,15 +1468,19 @@ window.__game = {
   act, accuse: id => S.net.send('accuse', { target: id }),
   answer: (q, a) => setAnswer(q, a),
   teleport: (x, z) => { S.me.x = x; S.me.z = z; },
-  selectHot,
   plant: (kind, x, z) => S.net.send('trap', { id: 'tr-' + makeId().slice(0, 5), kind, pos: [x, 0, z] }),
-  throwTo: (pid, text) => {
+  // send a note with real answer marks to a target (test hook)
+  throwTo: (pid, marks = []) => {
     const cv = document.createElement('canvas'); cv.width = 180; cv.height = 120;
     const c = cv.getContext('2d'); c.fillStyle = '#f6f1e0'; c.fillRect(0, 0, 180, 120);
-    c.fillStyle = '#222'; c.font = 'bold 44px system-ui'; c.textAlign = 'center'; c.fillText(text, 90, 72);
-    S.net.send('throw', { id: 'nt-' + makeId().slice(0, 5), to: pid, img: cv.toDataURL('image/png') });
+    c.fillStyle = '#1c4a2a'; c.font = 'bold 22px system-ui'; c.textAlign = 'center';
+    c.fillText(marks.map(m => `Q${m.q + 1}=${LETTERS[m.a]}`).join(' '), 90, 64);
+    S.net.send('throw', { id: 'nt-' + makeId().slice(0, 5), to: pid, img: cv.toDataURL('image/png'), marks });
   },
   students: () => students().map(p => ({ id: p.id, name: p.name })),
   toggleSeat,
+  tp: () => S.tp,
+  eye: () => [S.headPt.x, S.headPt.y, S.headPt.z],
+  aimNote: () => { const seat = mySeat(); const n = [...S.notes.values()].find(x => x.desk === seat); return n ? [n.mesh.position.x, n.mesh.position.y, n.mesh.position.z] : null; },
   itemsAt: () => [...S.items.values()].map(i => ({ id: i.id, kind: i.kind, pos: i.pos })),
 };
