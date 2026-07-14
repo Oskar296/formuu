@@ -59,11 +59,15 @@ function layout(mapId) {
 
 const mat = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, ...o });
 
+let ANISO = 8;   // set from the renderer's real max in main.js via setAniso()
+export function setAniso(n) { ANISO = Math.max(1, n | 0); }
 function tex(w, h, draw, repeat) {
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
   draw(cv.getContext('2d'), w, h);
   const t = new THREE.CanvasTexture(cv);
   t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = ANISO;   // sharp at grazing angles (floors, walls, wood)
+  t.generateMipmaps = true;
   if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repeat[0], repeat[1]); }
   return t;
 }
@@ -191,13 +195,19 @@ export function lights(scene) {
   sun.position.set(-9, 9, 3);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -13; sun.shadow.camera.right = 13;
-  sun.shadow.camera.top = 12; sun.shadow.camera.bottom = -13;
-  sun.shadow.camera.far = 45; sun.shadow.bias = -0.0004;
+  // tighter frustum → more shadow resolution concentrated on the room
+  sun.shadow.camera.left = -12; sun.shadow.camera.right = 12;
+  sun.shadow.camera.top = 12; sun.shadow.camera.bottom = -12;
+  sun.shadow.camera.far = 40; sun.shadow.camera.near = 0.5;
+  sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.035;
   scene.add(sun);
+  // a dim cool fill from the opposite side lifts the shadow side of everything
+  const fill = new THREE.DirectionalLight('#aebfe0', 0.32);
+  fill.position.set(8, 5, -4);
+  scene.add(fill);
   const amb = new THREE.AmbientLight('#b8c0d4', 0.4);
   scene.add(amb);
-  LIGHTS = { hemi, sun, amb };
+  LIGHTS = { hemi, sun, fill, amb };
 }
 
 let worldGroup = null;
@@ -227,6 +237,7 @@ export function buildWorld(scene, mapId = 'classroom') {
     LIGHTS.sun.intensity = A.sun; LIGHTS.sun.color.set(A.sunCol);
     LIGHTS.hemi.intensity = A.hemi;
     LIGHTS.amb.intensity = A.amb;
+    LIGHTS.fill.intensity = A.amb * 0.8;   // cool fill tracks the mood
   }
   if (night) {
     // a warm desk lamp at the teacher's post and a cold moon wash
@@ -237,6 +248,18 @@ export function buildWorld(scene, mapId = 'classroom') {
     moon.position.set(-ROOM.x + 1, 3.4, 0);
     add(moon);
   }
+
+  // soft contact-shadow decal so furniture visibly "sits" on the floor
+  const shadowTex = tex(64, 64, (c, w, h) => {
+    const g = c.createRadialGradient(w / 2, h / 2, 2, w / 2, h / 2, w / 2);
+    g.addColorStop(0, 'rgba(0,0,0,0.42)'); g.addColorStop(0.65, 'rgba(0,0,0,0.22)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+  });
+  const shadowMat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false, opacity: night ? 0.5 : 1 });
+  const contact = (x, z, rx, rz = rx) => {
+    const s = add(new THREE.Mesh(new THREE.PlaneGeometry(rx, rz), shadowMat));
+    s.rotation.x = -Math.PI / 2; s.position.set(x, 0.018, z); s.renderOrder = 1;
+  };
 
   // floor
   const floorMap = { classroom: plankTex(), lab: tileTex(), gym: courtTex(), library: carpetTex(), detention: plankTex(96, 14) }[mapId];
@@ -547,6 +570,8 @@ export function buildWorld(scene, mapId = 'classroom') {
     }
   });
   DESKS.forEach((d, i) => {
+    contact(d.x, d.deskZ, 2.0, 1.3);          // grounding shadow under desk
+    contact(d.x, d.z + 0.15, 1.0, 1.0);       // and under the chair
     const top = add(new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.07, 1.0), wood));
     top.position.set(d.x, 1.07, d.deskZ); top.castShadow = top.receiveShadow = true;
     surfaces.push({ mesh: top, desk: i });
@@ -612,6 +637,7 @@ export function buildWorld(scene, mapId = 'classroom') {
   });
 
   // teacher's desk + phone
+  contact(TEACHER_DESK.x, TEACHER_DESK.z, 3.0, 1.5);
   const tdesk = add(new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.0, 1.1), mat('#7a5230', { roughness: 0.6 })));
   tdesk.position.set(TEACHER_DESK.x, 0.5, TEACHER_DESK.z);
   tdesk.castShadow = tdesk.receiveShadow = true;
@@ -622,6 +648,7 @@ export function buildWorld(scene, mapId = 'classroom') {
   handset.position.set(TEACHER_DESK.x + 0.8, 1.16, TEACHER_DESK.z);
 
   // shame stool
+  contact(STOOL.x, STOOL.z, 0.9, 0.9);
   const stoolTop = add(new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.06, 18), mat('#8a5a34', { roughness: 0.6 })));
   stoolTop.position.set(STOOL.x, 0.62, STOOL.z); stoolTop.castShadow = true;
   for (let i = 0; i < 3; i++) {

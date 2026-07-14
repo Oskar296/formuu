@@ -154,7 +154,7 @@ function nameSprite(text, bg) {
 // One figure instance: shared geometry, own skeleton, own tint.
 export function makeFigure(scene, { color = '#eef0f2', name = '', tag = null, scale = 1 } = {}) {
   const geo = bakeFigure();
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.52, metalness: 0.0, envMapIntensity: 1.15 });
   const mesh = new THREE.SkinnedMesh(geo, mat);
   mesh.castShadow = true;
   const bones = SEGS.map(() => new THREE.Bone());
