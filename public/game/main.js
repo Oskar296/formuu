@@ -78,10 +78,8 @@ const S = {
   strikes: {}, expelled: {}, authority: 100, inspection: 100,
   duty: null, nextDutyAt: 0, riotUntil: 0, lastAccuseAt: -99, ACCUSE_CD,
   cheatLog: [], figures: {}, poses: {}, walkPh: {}, lastPos: {}, leanUntil: {},
-  traps: new Map(), notes: new Map(),   // notes: stuck under desks AND landed on desks
-  items: new Map(),                     // rare cheat items spawned around the room
-  standing: false, standingSet: {}, lastOOS: {}, hasMirror: false, hasCushion: false,
-  hasSmoke: false, hasPass: false, hasRoach: false, smokes: [], passUntil: {}, board: null,
+  traps: new Map(), notes: new Map(),   // notes hidden under / left on desks + thrown
+  standing: false, standingSet: {}, lastOOS: {}, board: null,
   attach: {}, myTrapUsed: false,
   me: { x: 4, z: 6, yaw: Math.PI, walk: 0 }, vx: 0, vz: 0, stun: 0, stuck: 0, keys: {},
   yaw: Math.PI, pitch: 0, locked: false, tp: false, headPt: new THREE.Vector3(),
@@ -156,7 +154,7 @@ function refreshWho() {
     S.mapSel = b.dataset.map;
     [...$('mapRow').children].forEach(x => x.classList.toggle('sel', x === b));
     $('mapNote').textContent = S.mapSel === 'random' ? '🎲 random map each round'
-      : `${MAPS[S.mapSel].icon} ${MAPS[S.mapSel].name}${MAPS[S.mapSel].items.includes('smoke') ? ' — exclusive: smoke vial' : MAPS[S.mapSel].items.includes('pass') ? ' — exclusive: hall pass' : ''}`;
+      : `${MAPS[S.mapSel].icon} ${MAPS[S.mapSel].name}`;
   }));
   S.diffSel = 'normal';
   const DIFF_NOTE = { chill: '😴 substitute teacher — barely awake', normal: '🧑‍🏫 normal teacher', hawk: '🦅 hawk — sees EVERYTHING, students cheat sneakier' };
@@ -270,14 +268,6 @@ function hostPhase(phase) {
     // exam (so the cheat window is guaranteed, not dependent on the teacher)
     for (const tr of S.traps.values())
       if (tr.armed) tr.ringAt = now() + (0.12 + Math.random() * 0.7) * DUR.exam / TSCALE;
-    // rare cheat items appear around the room — you must LEAVE YOUR SEAT to
-    // grab one. Each map has its own pool (lab: smoke vial, gym: hall pass)
-    const rx = ROOM.x - 2.0, rz = ROOM.z - 1.2;
-    const spots = [[-rx, -rz + 2], [rx, -2.2], [-rx, 3.1], [rx, rz - 1], [0, rz],
-      [TEACHER_DESK.x, TEACHER_DESK.z + 1.7], [3.2, -rz + 2.4]]
-      .sort(() => Math.random() - 0.5);
-    [...MAPS[room.mapId].items].sort(() => Math.random() - 0.5).forEach((kind, i) =>
-      S.net.send('itemSpawn', { id: 'it-' + makeId().slice(0, 5), kind, pos: [spots[i][0], 0, spots[i][1]] }));
   }
 }
 function hostTick(dt) {
@@ -295,7 +285,6 @@ function hostTick(dt) {
   // window so the teacher can accuse a wanderer at ANY moment, not just 5s
   for (const p of students()) {
     if (S.expelled[p.id] || S.seats[p.id] == null) continue;
-    if (S.passUntil[p.id] > t) continue;   // hall pass: wandering is legal
     if (S.standingSet[p.id] && t > (S.lastOOS[p.id] || 0) + 1.4) { S.lastOOS[p.id] = t; logCheat(p.id, 'OUT OF THEIR SEAT'); }
   }
   if (!S.duty && t >= S.nextDutyAt) {
@@ -357,28 +346,18 @@ function hostResults(reason) {
   if (rows[0] && !rows[0].expelled) rows[0].crown = true;
   S.net.send('results', { rows, avg, pass, reason });
 }
-function inSmoke(pid) {
-  if (!S.smokes.length) return false;
-  const t = now();
-  const pose = S.standingSet[pid] && S.poses[pid];
-  const seat = S.seats[pid];
-  const px = pose ? pose.x : seat != null ? DESKS[seat].x : null;
-  const pz = pose ? pose.z : seat != null ? DESKS[seat].z : null;
-  if (px == null) return false;
-  return S.smokes.some(s => s.until > t && Math.hypot(s.x - px, s.z - pz) < 2.8);
-}
 const inWindow = () => now() < S.windowUntil;   // a distraction is covering the class
-const WINDOW_SECS = { clock: 9, cushion: 6, marbles: 5, glue: 5, pepper: 5 };
+const WINDOW_SECS = { clock: 9, marbles: 5, glue: 5, pepper: 5 };
 function openCheatWindow(sec, kind, who) {
   S.windowUntil = Math.max(S.windowUntil, now() + sec);
   if (kind === 'clock') S.ringingUntil = Math.max(S.ringingUntil, now() + sec);
-  const label = { clock: '⏰ ALARM GOING OFF', cushion: '💨 PFFFRT!', marbles: '💫 MARBLES!', glue: '🍯 GLUED DOWN', pepper: '🤧 PEPPER CLOUD' }[kind] || '🎯 CHAOS';
+  const label = { clock: '⏰ ALARM GOING OFF', marbles: '💫 MARBLES!', glue: '🍯 GLUED DOWN', pepper: '🤧 PEPPER CLOUD' }[kind] || '🎯 CHAOS';
   banner(isTeacher() ? `${label} — WHO DID THIS?!` : `🎯 CHEAT WINDOW — nobody's watching!`, Math.min(4000, sec * 1000));
   const v = $('riotVignette'); v.style.opacity = 0.65; setTimeout(() => (v.style.opacity = 0), Math.min(sec, 5) * 1000);
   if (!isTeacher()) sfx.learn();
 }
 function logCheat(pid, kind, img) {
-  if (ringing() || inWindow() || inSmoke(pid)) return;   // cover noise / distraction / smoke
+  if (ringing() || inWindow()) return;   // cover noise / distraction
   S.cheatLog.push({ pid, kind, img, until: now() + CATCH_WINDOW, riot: inRiot() });
   if (S.cheatLog.length > 300) S.cheatLog.splice(0, 150);
 }
@@ -411,11 +390,18 @@ function onEvent(ev) {
     }
     case 'stick': {
       if (S.notes.has(data.id)) break;
-      const d = DESKS[data.desk];
-      const pos = [d.x + (Math.random() - 0.5) * 0.5, 1.115, d.deskZ + (Math.random() - 0.5) * 0.3];
-      S.notes.set(data.id, { ...data, kind: 'landed', mesh: noteMesh(pos, false), owner: from });
-      capDeskNotes(data.desk);
-      if (from === S.myId) toast('📝 note left on your desk');
+      let pos, kind;
+      if (data.decoy) {   // on the teacher's desk — bait
+        pos = [TEACHER_DESK.x + (Math.random() - 0.5) * 0.9, 1.06, TEACHER_DESK.z + (Math.random() - 0.5) * 0.4];
+        kind = 'decoy';
+      } else {
+        const d = DESKS[data.desk];
+        if (data.hidden) { pos = [d.x + (Math.random() - 0.5) * 0.5, 0.99, d.deskZ + 0.28]; kind = 'hidden'; }
+        else { pos = [d.x + (Math.random() - 0.5) * 0.5, 1.115, d.deskZ + (Math.random() - 0.5) * 0.3]; kind = 'landed'; }
+      }
+      S.notes.set(data.id, { ...data, kind, mesh: noteMesh(pos, !!data.hidden), owner: from });
+      if (data.desk >= 0) capDeskNotes(data.desk);
+      if (from === S.myId) toast(data.decoy ? "🎭 decoy planted on the teacher's desk" : data.hidden ? '🙈 note hidden under the desk' : '📝 note left on your desk');
       break;
     }
     case 'throw': {
@@ -449,81 +435,6 @@ function onEvent(ev) {
       logCheat(from, 'writing on the board');
       if (from === S.myId) toast('🖊 written on the board — everyone can read it!');
       else gesture(from, '🖊 writes on the board');
-      break;
-    }
-    case 'itemSpawn': {
-      if (S.items.has(data.id)) break;
-      S.items.set(data.id, { ...data, mesh: itemMesh(data.kind, data.pos) });
-      if (!isTeacher() && now() - (S.itemToastAt || 0) > 3) {
-        S.itemToastAt = now();
-        toast('✨ rare cheat items appeared around the room — leave your seat to grab one', 'gold');
-      }
-      break;
-    }
-    case 'itemGet': {   // host adjudicates first-come-first-served
-      if (S.net.isHost() && S.items.has(data.id)) S.net.send('itemTaken', { id: data.id, by: from });
-      break;
-    }
-    case 'itemTaken': {
-      const it = S.items.get(data.id); if (!it) break;
-      scene.remove(it.mesh); S.items.delete(data.id);
-      if (data.by === S.myId) {
-        sfx.pickup();
-        if (it.kind === 'scrap' || it.kind === 'book') {
-          // scrap reveals one answer; the library's encyclopedia reveals TWO
-          const mine = S.answers[S.myId] || [];
-          const n = it.kind === 'book' ? 2 : 1;
-          let got = 0;
-          for (let k = 0; k < n; k++) {
-            const missing = S.exam.questions.filter(q => (S.answers[S.myId] || [])[q.id] !== q.correct);
-            if (!missing.length) break;
-            const q = missing[(Math.random() * missing.length) | 0];
-            setAnswer(q.id, q.correct);
-            toast(`${it.kind === 'book' ? '📖' : '📜'} ${it.kind === 'book' ? 'the encyclopedia reveals' : 'the scrap says'}: Q${q.id + 1} = ${LETTERS[q.correct]}!`, 'gold');
-            got++;
-          }
-          if (!got) toast(`${it.kind === 'book' ? '📖' : '📜'} tells you nothing new`);
-        } else if (it.kind === 'roach') {
-          S.hasRoach = true;
-          toast('🪳 a cockroach! release it near the teacher to send them running', 'gold');
-        } else if (it.kind === 'mirror') {
-          S.hasMirror = true;
-          toast('🪞 mirror! peek at ANYONE\'s paper from your seat', 'gold');
-        } else if (it.kind === 'smoke') {
-          S.hasSmoke = true;
-          toast('🌫 smoke vial! aim at the floor to smash it — cheats inside the cloud are invisible', 'gold');
-        } else if (it.kind === 'pass') {
-          S.hasPass = true;
-          toast('🎫 hall pass! your next stroll out of your seat is LEGAL for 12s', 'gold');
-        } else {
-          S.hasCushion = true;
-          toast('💨 whoopee cushion! aim at the floor to hide it', 'gold');
-        }
-      } else if (!isTeacher()) toast(`${ITEM_ICON[it.kind]} ${nameOf(data.by)} grabbed the ${it.kind}`);
-      break;
-    }
-    case 'smoke': {
-      sfx.crash(volAt(data.x, data.z) * 0.7);
-      S.smokes.push({ x: data.x, z: data.z, until: now() + 6, born: now(), mesh: smokePuff(data.x, data.z) });
-      gesture(from, '🌫 SMOKE!');
-      if (isTeacher()) banner('🌫 SMOKE?! WHO BROUGHT SMOKE TO AN EXAM?!', 2600);
-      break;
-    }
-    case 'usePass': {
-      S.passUntil[from] = now() + 12;
-      gesture(from, '🎫 hall pass!', 'rgba(160,130,20,0.85)');
-      if (from === S.myId) toast('🎫 hall pass active — 12 seconds of legal wandering', 'gold');
-      break;
-    }
-    case 'roach': {
-      sfx.sneeze(0.8);
-      gesture(from, '🪳 EEK!');
-      if (isTeacher()) {
-        // the teacher panics: jump back, blinded flails, can't accuse for a bit
-        S.stun = now() + 3.2; blind(1.0);
-        banner('🪳 A COCKROACH?! GET IT AWAY!', 3000);
-        S.lastAccuseAt = now() + 3;   // no accusing while flailing
-      } else banner(`🪳 ${nameOf(from)} let a cockroach loose on the teacher!`, 2600);
       break;
     }
     case 'accuse': if (S.net.isHost()) hostAccuse(from, data.target); break;
@@ -571,8 +482,6 @@ function onEvent(ev) {
         if (isTeacher()) blind(2.6);
       } else if (tr.kind === 'clock') {
         S.ringingId = data.id; sfx.startRing('clock');
-      } else if (tr.kind === 'cushion') {
-        sfx.honk(tv); removeTrap(data.id); sfx.laugh();
       }
       // EVERY distraction opens a loud CHEAT WINDOW — nothing can be caught
       openCheatWindow(WINDOW_SECS[tr.kind] || 5, tr.kind, who);
@@ -667,8 +576,7 @@ function startRound(data) {
   S.stun = 0; S.stuck = 0; S.ringingId = null; S.ringingUntil = 0; S.windowUntil = 0;
   S.sheetOpen = true;
   S.standing = false; S.standingSet = {}; S.lastOOS = {};
-  S.hasMirror = false; S.hasCushion = false; S.vx = 0; S.vz = 0;
-  S.hasSmoke = false; S.hasPass = false; S.hasRoach = false; S.passUntil = {};
+  S.vx = 0; S.vz = 0;
   for (const pid in S.seats) S.answers[pid] = Array(N_QUESTIONS).fill(null);
   clearRound(false);
   bots.reset();
@@ -699,9 +607,7 @@ function clearRound(alsoUI = true) {
   S.figures = {}; S.poses = {}; S.walkPh = {}; S.lastPos = {}; S.leanUntil = {};
   for (const tr of S.traps.values()) scene.remove(tr.mesh);
   for (const n of S.notes.values()) scene.remove(n.mesh);
-  for (const it of S.items.values()) scene.remove(it.mesh);
-  for (const s of S.smokes) scene.remove(s.mesh);
-  S.traps.clear(); S.notes.clear(); S.items.clear(); S.smokes.length = 0;
+  S.traps.clear(); S.notes.clear();
   clearBottleLabels(); clearBoard();
   sfx.stopRing();
   if (alsoUI) ['sheet', 'teachBar', 'crosshair', 'prompt', 'helpTip'].forEach(i => show(i, false));
@@ -721,12 +627,14 @@ function setPhase(phase, endsAt) {
     // the paper starts in your hands — free the mouse so answers are clickable
     if (stud && S.sheetOpen && mySeat() != null) document.exitPointerLock && document.exitPointerLock();
   }
-  if (phase === 'prep') banner(`${MAPS[room.mapId].icon} ${MAPS[room.mapId].name} — ` + (stud ? '🛠 RIG THE ROOM before the teacher arrives!' : '👀 the class is up to something…'), 3200);
+  if (phase === 'prep') {
+    banner(`${MAPS[room.mapId].icon} ${MAPS[room.mapId].name} — ` + (stud ? '🧠 PLAN YOUR CHEATS before the teacher arrives!' : '👀 the class is up to something…'), 3200);
+    if (stud) setTimeout(() => toast('🙈 hide notes under desks · 🎭 decoy the teacher · 🛠 rig distractions · 💪 ink your arm', 'gold'), 900);
+  }
 }
 
 // ---------------------------------------------------------------- world objects
-const TRAP_ICON = { marbles: '🔮', glue: '🍯', pepper: '🌶', clock: '⏰', cushion: '💨' };
-const ITEM_ICON = { mirror: '🪞', scrap: '📜', cushion: '💨', smoke: '🌫', pass: '🎫', book: '📖', roach: '🪳' };
+const TRAP_ICON = { marbles: '🔮', glue: '🍯', pepper: '🌶', clock: '⏰' };
 function trapMesh(kind, pos) {
   const g = new THREE.Group();
   const m = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, ...o });
@@ -747,57 +655,8 @@ function trapMesh(kind, pos) {
     b.rotation.x = Math.PI / 2; b.position.set(pos[0], 0.13, pos[2]); g.add(b);
     const bell = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), m('#c0a030', { metalness: 0.5, roughness: 0.3 }));
     bell.position.set(pos[0], 0.24, pos[2]); g.add(bell);
-  } else if (kind === 'cushion') {
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.22, 0.05, 16), m('#d86a9a', { roughness: 0.7 }));
-    b.position.set(pos[0], 0.03, pos[2]); g.add(b);
   }
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
-  scene.add(g);
-  return g;
-}
-// rare item pickups: small props with a glowing halo so they catch your eye
-function itemMesh(kind, pos) {
-  const g = new THREE.Group();
-  const m = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, ...o });
-  if (kind === 'mirror') {
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(0.13, 18), m('#cfe4f2', { metalness: 0.9, roughness: 0.08 }));
-    disc.position.y = 0.3; g.add(disc);
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.02, 8, 18), m('#8a6a3a'));
-    rim.position.y = 0.3; g.add(rim);
-  } else if (kind === 'scrap') {
-    const p = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.16), m('#f2e8b8', { side: THREE.DoubleSide, roughness: 0.95 }));
-    p.rotation.x = -0.9; p.position.y = 0.28; g.add(p);
-  } else if (kind === 'smoke') {
-    const v = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.16, 10),
-      m('#b8c8d0', { roughness: 0.15, transparent: true, opacity: 0.8 }));
-    v.position.y = 0.3; g.add(v);
-    const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.05, 8), m('#8a6a42'));
-    cork.position.y = 0.4; g.add(cork);
-  } else if (kind === 'pass') {
-    const card = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.14), m('#e8c84e', { side: THREE.DoubleSide, roughness: 0.6 }));
-    card.rotation.x = -0.7; card.position.y = 0.3; g.add(card);
-  } else if (kind === 'book') {
-    const cover = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.3, 0.07), m('#7a3a34', { roughness: 0.7 }));
-    cover.position.y = 0.3; g.add(cover);
-    const pages = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.27, 0.06), m('#f2ead0'));
-    pages.position.set(0.01, 0.3, 0.005); g.add(pages);
-  } else if (kind === 'roach') {
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), m('#3a2a1a', { roughness: 0.6 }));
-    body.scale.set(1, 0.6, 1.5); body.position.y = 0.09; g.add(body);
-    for (const s of [-1, 1]) for (const zz of [-0.05, 0.03, 0.1]) {
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.1, 5), m('#2a1a10'));
-      leg.position.set(s * 0.08, 0.05, zz); leg.rotation.z = s * 0.8; g.add(leg);
-    }
-  } else {
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.06, 16), m('#d86a9a', { roughness: 0.7 }));
-    b.position.y = 0.28; g.add(b);
-  }
-  for (const ch of g.children) ch.userData.baseY = ch.position.y;
-  const halo = new THREE.Mesh(new THREE.CircleGeometry(0.32, 20),
-    new THREE.MeshBasicMaterial({ color: '#ffd76a', transparent: true, opacity: 0.35, depthWrite: false }));
-  halo.rotation.x = -Math.PI / 2; halo.position.y = 0.02; halo.userData.halo = true;
-  g.add(halo);
-  g.position.set(pos[0], 0, pos[2]);
   scene.add(g);
   return g;
 }
@@ -866,20 +725,6 @@ function flyNote(fromId, toId, onLand) {
     new THREE.MeshStandardMaterial({ color: '#fdf7e3' }));
   scene.add(m);
   flights.push({ m, t: 0, a: a.group.position.clone().setY(1.35), b: new THREE.Vector3(d.x, 1.12, d.deskZ), onLand });
-}
-// a billowing cloud: cheats inside it never reach the teacher's cheat log
-function smokePuff(x, z) {
-  const g = new THREE.Group();
-  for (let i = 0; i < 6; i++) {
-    const s = new THREE.Mesh(new THREE.SphereGeometry(0.55 + Math.random() * 0.5, 12, 10),
-      new THREE.MeshStandardMaterial({ color: '#c8ccd4', roughness: 1, transparent: true, opacity: 0.55, depthWrite: false }));
-    s.position.set((Math.random() - 0.5) * 1.6, 0.5 + Math.random() * 1.1, (Math.random() - 0.5) * 1.6);
-    g.add(s);
-  }
-  g.position.set(x, 0, z);
-  g.scale.setScalar(0.3);
-  scene.add(g);
-  return g;
 }
 const bottleLabels = [];
 function bottleLabel(seat) {
@@ -1080,8 +925,7 @@ function toggleSeat() {
     S.standing = true;
     S.me.x = d.x; S.me.z = d.z + 1.0; S.vx = 0; S.vz = 0;
     act('stand');
-    if (S.hasPass) { S.hasPass = false; S.net.send('usePass', {}); }
-    else toast('🪑 you are OUT OF YOUR SEAT — the teacher can accuse you on sight!', 'red');
+    toast('🪑 you are OUT OF YOUR SEAT — the teacher can accuse you on sight!', 'red');
     show('sheet', false);
   } else if (Math.hypot(S.me.x - d.x, S.me.z - (d.z + 0.15)) < 1.5) {
     S.standing = false;
@@ -1128,6 +972,7 @@ function computePrompt() {
         }
       }
       if (!S.prompt) for (const [id, n] of S.notes) {
+        if (n.kind === 'hidden') continue;   // the teacher can't see under desks
         const h = ray.intersectObject(n.mesh, true);
         if (h.length && h[0].distance < 3.4) {
           set('📢 CLICK — confiscate the note (read it aloud)', () => S.net.send('noteGone', { id, readAloud: true }));
@@ -1139,13 +984,16 @@ function computePrompt() {
     // FREEFORM CHEATING: aim at a thing → draw on it, or read what's on it.
     const exam = S.phase === 'exam';
     const draw = (title, ev) => openScribbler(title, p => S.net.send(ev.type, { ...ev.data, img: p.img, marks: p.marks }));
-    // 1) read any cheat note you can reach (yours anytime; others' while roaming)
+    // 1) read a cheat note you can reach. Notes at your desk (incl. ones hidden
+    //    under it during prep) are yours to read; others' are swipeable only
+    //    while roaming, and hidden notes only ever belong to their desk's owner.
     for (const [id, n] of S.notes) {
       const h = ray.intersectObject(n.mesh, true);
       if (!h.length) continue;
       const mine = n.desk === seat;
-      if (mine ? h[0].distance > 2.8 : !(S.standing && h[0].distance < 2.4)) continue;
-      set(mine ? '🗒 CLICK — read the note on your desk' : `🕵️ CLICK — swipe ${nameOf(n.owner)}'s note`, () => {
+      if (mine ? h[0].distance > 2.8 : !(S.standing && h[0].distance < 2.4 && n.kind !== 'hidden')) continue;
+      const label = n.kind === 'hidden' ? '🙈 CLICK — read your hidden note' : mine ? '🗒 CLICK — read the note on your desk' : `🕵️ CLICK — swipe ${nameOf(n.owner)}'s note`;
+      set(label, () => {
         act('readNote');
         viewer(mine ? `🗒 Note from ${nameOf(n.owner)}:` : `🕵️ ${nameOf(n.owner)}'s note:`, n.img, n.marks);
         S.net.send('noteGone', { id });   // reading consumes the note (declutter)
@@ -1154,25 +1002,22 @@ function computePrompt() {
     }
     // 2) trap-armable world objects during prep (aim + arm, no menu)
     if (!S.prompt && S.phase === 'prep') armPrompt(set);
-    // 3) rare item on the floor → grab it (exam)
-    if (!S.prompt && exam) for (const [id, it] of S.items) {
-      const h = ray.intersectObject(it.mesh, true);
-      if (h.length && h[0].distance < 2.6) { set(`${ITEM_ICON[it.kind]} CLICK — grab the ${it.kind}`, () => S.net.send('itemGet', { id })); break; }
-    }
-    // 4) carrying a deployable (cushion / smoke) → floor
-    if (!S.prompt && exam && (S.hasCushion || S.hasSmoke)) {
-      const hit = new THREE.Vector3();
-      if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit) &&
-          Math.abs(hit.x) < ROOM.x && Math.abs(hit.z) < ROOM.z && hit.distanceTo(new THREE.Vector3(S.me.x, 0, S.me.z)) < 3) {
-        if (S.hasCushion) set('💨 CLICK — hide the whoopee cushion here', () => { S.net.send('trap', { id: 'tr-' + makeId().slice(0, 5), kind: 'cushion', pos: [hit.x, 0, hit.z] }); S.hasCushion = false; });
-        else set('🌫 CLICK — smash the smoke vial here', () => { S.net.send('smoke', { x: hit.x, z: hit.z }); S.hasSmoke = false; });
+    // 3) PLANNING (prep): hide a note UNDER any desk — the teacher can't
+    //    confiscate it, and whoever sits there retrieves it during the exam
+    if (!S.prompt && S.phase === 'prep') {
+      const h = ray.intersectObjects(room.surfaces.map(s => s.mesh));
+      if (h.length && h[0].distance < 3.2) {
+        const desk = room.surfaces.find(s => s.mesh === h[0].object).desk;
+        set('🙈 CLICK — hide a note UNDER this desk (safe from the teacher)', () => draw("🙈 Draw a note to hide under this desk — stamp the answers to share", { type: 'stick', data: { id: 'nt-' + makeId().slice(0, 5), desk, hidden: true } }));
       }
     }
-    // 5) carrying the cockroach → release near the teacher
-    if (!S.prompt && exam && S.hasRoach && S.teacherId && S.teacherId !== S.myId) {
-      const tp = S.poses[S.teacherId], tf = S.figures[S.teacherId];
-      if (tp && tf && Math.hypot(tp.x - S.me.x, tp.z - S.me.z) < 3.5 && ray.intersectObject(tf.mesh, true).length)
-        set('🪳 CLICK — release the cockroach!', () => { S.net.send('roach', { x: tp.x, z: tp.z }); S.hasRoach = false; });
+    // 4) plant a DECOY note on the teacher's desk (bait them into wasting a move)
+    if (!S.prompt && (S.phase === 'prep' || S.standing) && Math.hypot(S.me.x - TEACHER_DESK.x, S.me.z - TEACHER_DESK.z) < 2.3)
+      set("🎭 CLICK — plant a decoy on the teacher's desk", () => draw('🎭 Draw a decoy note — bait the teacher', { type: 'stick', data: { id: 'nt-' + makeId().slice(0, 5), desk: -1, decoy: true } }));
+    // 5) ink a cheat on your own arm (look down at yourself)
+    if (!S.prompt && !S.standing && S.pitch < -0.6) {
+      if ((S.attach[S.myId] || {}).arm) set('💪 CLICK — read your arm', () => act('readArm'));
+      else set('✍️ CLICK — ink a cheat on your arm (peekable)', () => draw('✍️ Ink a cheat on your forearm', { type: 'attach', data: { slot: 'arm' } }));
     }
     // 6) aim at a classmate → draw and pass them a note
     if (!S.prompt && exam) for (const p of students()) {
@@ -1193,8 +1038,7 @@ function computePrompt() {
         const dist = h[0].distance;
         if (owner && owner !== S.myId) {
           const near = S.standing ? dist < 2.8 : (seatAdjacent(deskIdx, seat) && dist < 3.4);
-          const mirror = !near && !S.standing && S.hasMirror && dist < 14;
-          if (near || mirror) { const dir = DESKS[deskIdx].x > DESKS[seat].x ? 1 : -1; set(`${mirror ? '🪞' : '👀'} CLICK — peek at ${nameOf(owner)}'s paper`, () => act('peek', { target: owner, dir })); }
+          if (near) { const dir = DESKS[deskIdx].x > DESKS[seat].x ? 1 : -1; set(`👀 CLICK — peek at ${nameOf(owner)}'s paper`, () => act('peek', { target: owner, dir })); }
         } else if (deskIdx === seat && !S.standing && dist < 3.4) {
           set('📄 CLICK — ' + (S.sheetOpen ? 'put your paper down (TAB)' : 'pick up your paper (TAB)'), () => setSheet(!S.sheetOpen));
         }
@@ -1372,23 +1216,6 @@ function frame(nowMs) {
   }
   if (room.clockHand) room.clockHand.rotation.z = -t * 0.35;
 
-  // item pickups shimmer and slowly spin so they catch the eye
-  for (const it of S.items.values()) {
-    it.mesh.rotation.y += dt * 1.3;
-    for (const ch of it.mesh.children)
-      if (!ch.userData.halo) ch.position.y = ch.userData.baseY + Math.sin(t * 2.4 + it.mesh.position.x) * 0.045;
-  }
-  // smoke clouds billow up, drift, then thin out and vanish
-  for (let i = S.smokes.length - 1; i >= 0; i--) {
-    const s = S.smokes[i];
-    const age = t - s.born, left = s.until - t;
-    if (left <= -0.5) { scene.remove(s.mesh); S.smokes.splice(i, 1); continue; }
-    s.mesh.scale.setScalar(Math.min(1, 0.3 + age * 1.1));
-    s.mesh.rotation.y += dt * 0.35;
-    const op = Math.max(0, Math.min(0.55, left * 0.7));
-    for (const ch of s.mesh.children) ch.material.opacity = op;
-  }
-
   // tension chips: "out of seat" reminder + teacher-proximity warning
   const inDanger = !isTeacher() && S.phase === 'exam' && !S.expelled[S.myId] && mySeat() != null;
   $('oos').style.opacity = inDanger && S.standing ? 1 : 0;
@@ -1458,9 +1285,7 @@ window.__game = {
       answers: S.answers[S.myId], strikes: { ...S.strikes }, expelled: { ...S.expelled },
       authority: S.authority, inspection: S.inspection, traps: S.traps.size, notes: S.notes.size,
       prompt: S.prompt && S.prompt.text, isHost: S.net ? S.net.isHost() : false, country: S.exam && S.exam.country,
-      standing: S.standing, items: S.items.size, hasMirror: S.hasMirror, hasCushion: S.hasCushion,
-      hasSmoke: S.hasSmoke, hasPass: S.hasPass, hasRoach: S.hasRoach, smokes: S.smokes.length,
-      map: room.mapId, diff: S.diff };
+      standing: S.standing, notesN: S.notes.size, map: room.mapId, diff: S.diff };
   },
   skipPhase() { if (S.net && S.net.isHost()) S.phaseEnds = 0; },
   look(yaw, pitch) { S.yaw = yaw; S.pitch = pitch || 0; },
@@ -1482,5 +1307,4 @@ window.__game = {
   tp: () => S.tp,
   eye: () => [S.headPt.x, S.headPt.y, S.headPt.z],
   aimNote: () => { const seat = mySeat(); const n = [...S.notes.values()].find(x => x.desk === seat); return n ? [n.mesh.position.x, n.mesh.position.y, n.mesh.position.z] : null; },
-  itemsAt: () => [...S.items.values()].map(i => ({ id: i.id, kind: i.kind, pos: i.pos })),
 };

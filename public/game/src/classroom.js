@@ -7,11 +7,11 @@ import * as THREE from 'three';
 // reads fresh coordinates.
 
 export const MAPS = {
-  classroom: { name: 'Classroom', icon: '🏫', items: ['mirror', 'scrap', 'cushion'] },
-  lab: { name: 'Science Lab', icon: '🧪', items: ['smoke', 'scrap', 'mirror'] },
-  gym: { name: 'Gym Hall', icon: '🏀', items: ['pass', 'cushion', 'scrap'] },
-  library: { name: 'Library', icon: '📚', items: ['book', 'mirror', 'scrap'] },
-  detention: { name: 'Night Detention', icon: '🌙', items: ['roach', 'smoke', 'scrap'] },
+  classroom: { name: 'Classroom', icon: '🏫' },
+  lab: { name: 'Science Lab', icon: '🧪' },
+  gym: { name: 'Gym Hall', icon: '🏀' },
+  library: { name: 'Library', icon: '📚' },
+  detention: { name: 'Night Detention', icon: '🌙' },
 };
 
 export const DESKS = [];                       // seat positions (chair center), facing -z
