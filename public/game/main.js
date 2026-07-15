@@ -4,7 +4,8 @@ import { makeFigure, bakeFigure } from './src/figure.js';
 import { generateExam, dealKnowledge, score, N_QUESTIONS, LETTERS } from './src/exam.js';
 import { makeNet, onlineAvailable, p2pAvailable, makeId } from './src/net.js';
 import { makeBots, BotBrain } from './src/bots.js';
-import { profile, COLORS, colorHex } from './src/profile.js';
+import { profile, COLORS, colorHex, makeCode, validCode, achievementsFor } from './src/profile.js';
+import { makeSocial } from './src/social.js';
 import { sfx } from './src/audio.js';
 
 // THE EXAM — cheat together, don't get caught.
@@ -168,7 +169,10 @@ const S = {
   prompt: null,   // {text, run} — current crosshair action
 };
 const isTeacher = () => S.myRole === 'teacher';
-const students = () => S.roster.filter(p => p.role === 'student');
+// blocked = players a private-room host has denied (non-friends), excluded from
+// the roster everywhere so they can never be seated or counted.
+const seatable = () => S.roster.filter(p => !(S.blocked && S.blocked.has(p.id)));
+const students = () => seatable().filter(p => p.role === 'student');
 const nameOf = id => (S.roster.find(p => p.id === id) || {}).name || '???';
 const mySeat = () => S.seats[S.myId];
 const inRiot = () => now() < S.riotUntil;
@@ -193,7 +197,7 @@ function viewer(title, img, marks) {
   cp.classList.toggle('hidden', !has);
   if (has) {
     cp.textContent = `📋 Copy ${marks.length} answer${marks.length > 1 ? 's' : ''}`;
-    cp.onclick = () => { marks.forEach(m => setAnswer(m.q, m.a)); toast(`✅ copied ${marks.length} answer${marks.length > 1 ? 's' : ''} to your sheet`, 'gold'); sfx.learn(); $('viewer').classList.add('hidden'); };
+    cp.onclick = () => { marks.forEach(m => setAnswer(m.q, m.a)); profile.bump('copied', marks.length); toast(`✅ copied ${marks.length} answer${marks.length > 1 ? 's' : ''} to your sheet`, 'gold'); sfx.learn(); $('viewer').classList.add('hidden'); };
   }
   $('viewer').classList.remove('hidden');
 }
@@ -246,12 +250,12 @@ function refreshWho() {
   $('btnHow').onclick = () => show('howto', true);
   $('btnHowClose').onclick = () => show('howto', false);
   $('btnSolo').onclick = () => join('solo', role);
-  $('btnCreate').onclick = () => join('create', role);
+  $('btnCreate').onclick = () => join('create', role, null, $('privChk').checked);
   $('btnJoin').onclick = () => join('join', role, $('codeInput').value.trim().toUpperCase());
   $('btnStart').onclick = () => hostStart();
   $('btnAgain').onclick = () => { show('results', false); backToLobby(); };
   $('netNote').textContent = (onlineAvailable() || p2pAvailable())
-    ? 'Online rooms enabled — share the 4-letter code with friends on any device, anywhere.'
+    ? 'Online rooms enabled — share the 6-letter code with friends on any device, anywhere.'
     : 'Local mode: rooms work across TABS of this browser. Solo works everywhere.';
   $('soundBtn').onclick = () => ($('soundBtn').textContent = sfx.toggle() ? '🔇' : '🔊');
   // settings: username + color
@@ -268,17 +272,113 @@ function refreshWho() {
     show('settings', true);
   };
   $('btnSettingsDone').onclick = () => { profile.name = $('setName').value; refreshWho(); show('settings', false); };
+
+  // ---- social: friends + stats ----------------------------------------------
+  const social = makeSocial();
+  window.__social = social;                 // test/debug hook
+  social.onFriends(() => { renderFriends(); refreshWho(); });
+  social.onRequests(() => renderFriends());
+  social.onPresence(() => { if (!$('friends').classList.contains('hidden')) renderFriends(); });
+
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  function renderFriends() {
+    $('myCode').textContent = social.myCode();
+    $('socialStatus').textContent = social.online ? '🟢 online — requests deliver instantly'
+      : '🔌 connecting… (a friend must be online to receive requests)';
+    // incoming requests
+    const rs = $('reqSection'); rs.innerHTML = '';
+    if (social.incoming.length) {
+      const h = document.createElement('div'); h.className = 'setLbl'; h.style.marginTop = '10px'; h.textContent = 'FRIEND REQUESTS';
+      rs.appendChild(h);
+      for (const r of social.incoming) {
+        const row = document.createElement('div'); row.className = 'friendRow';
+        row.innerHTML = `<span><span class="rosterDot" style="background:${colorHex(r.color)}"></span>${esc(r.name)} <span class="dim">${r.code}</span></span>`;
+        const acc = document.createElement('button'); acc.textContent = '✓'; acc.title = 'accept'; acc.onclick = () => social.accept(r.code);
+        const dec = document.createElement('button'); dec.textContent = '✕'; dec.title = 'decline'; dec.onclick = () => social.decline(r.code);
+        const wrap = document.createElement('span'); wrap.style.display = 'flex'; wrap.style.gap = '4px'; wrap.append(acc, dec);
+        row.appendChild(wrap); rs.appendChild(row);
+      }
+    }
+    // friends
+    const fl = $('friendList'); fl.innerHTML = '';
+    const friends = profile.friends;
+    if (!friends.length) { fl.className = 'note'; fl.textContent = 'no friends yet — share your code above!'; }
+    else {
+      fl.className = '';
+      for (const f of friends) {
+        const row = document.createElement('div'); row.className = 'friendRow';
+        const on = social.isOnline(f.code);
+        row.innerHTML = `<span><span class="rosterDot" style="background:${colorHex(f.color)}"></span>${esc(f.name)} <span class="dim">${f.code}</span> ${on ? '🟢' : '⚪'}</span>`;
+        const view = document.createElement('button'); view.textContent = '📊'; view.title = 'view stats'; view.onclick = () => openStats(f);
+        const rm = document.createElement('button'); rm.textContent = '🗑'; rm.title = 'remove'; rm.onclick = () => { if (confirm('Remove ' + f.name + '?')) social.unfriend(f.code); };
+        const wrap = document.createElement('span'); wrap.style.display = 'flex'; wrap.style.gap = '4px'; wrap.append(view, rm);
+        row.appendChild(wrap); fl.appendChild(row);
+      }
+    }
+    // outgoing pending note
+    if (social.outgoing.length) {
+      const p = document.createElement('div'); p.className = 'note'; p.style.marginTop = '6px';
+      p.textContent = '⏳ waiting on: ' + social.outgoing.join(', ');
+      fl.appendChild(p);
+    }
+  }
+  $('btnFriends').onclick = () => { renderFriends(); show('friends', true); };
+  $('btnFriendsClose').onclick = () => show('friends', false);
+  $('myCode').onclick = () => { try { navigator.clipboard.writeText(social.myCode()); toast('📋 friend code copied'); } catch { /* no clipboard */ } };
+  $('btnAddFriend').onclick = () => {
+    const c = $('friendCodeInput').value.trim().toUpperCase();
+    if (c === social.myCode()) { toast("that's your own code", 'red'); return; }
+    if (profile.isFriend(c)) { toast('already friends', 'red'); return; }
+    if (social.request(c)) { $('friendCodeInput').value = ''; toast('📨 request sent to ' + c); renderFriends(); }
+    else toast('enter a valid 6-letter code', 'red');
+  };
+
+  // stats panel — for yourself, or (async) for a friend
+  function fillStats(title, stats) {
+    $('statsTitle').textContent = title;
+    const S2 = stats || {};
+    const rows = [
+      ['Rounds', S2.rounds | 0], ['Wins', S2.wins | 0],
+      ['As student', `${S2.studentWins | 0}/${S2.asStudent | 0}`], ['As teacher', `${S2.teacherWins | 0}/${S2.asTeacher | 0}`],
+      ['Best win streak', S2.bestStreak | 0], ['Clean wins', S2.cleanWins | 0],
+      ['Answers shared', S2.shared | 0], ['Answers copied', S2.copied | 0],
+      ['Times caught', S2.caught | 0], ['Times expelled', S2.expelled | 0],
+    ];
+    $('statsGrid').innerHTML = rows.map(([k, v]) =>
+      `<div class="statTile"><div class="statVal">${v}</div><div class="statKey">${k}</div></div>`).join('');
+    const ach = achievementsFor(S2);
+    const got = ach.filter(a => a.unlocked).length;
+    $('achGrid').innerHTML = ach.map(a =>
+      `<div class="achRow${a.unlocked ? ' on' : ''}"><span class="achIcon">${a.unlocked ? a.icon : '🔒'}</span>` +
+      `<span><b>${a.name}</b><br><span class="dim">${a.desc}</span></span></div>`).join('');
+    document.querySelector('#statsPanel .setLbl').textContent = `🏅 ACHIEVEMENTS — ${got}/${ach.length}`;
+  }
+  async function openStats(friend) {
+    show('statsPanel', true);
+    fillStats(`📊 ${friend.name}'s stats`, null);
+    $('statsGrid').innerHTML = '<div class="note" style="grid-column:1/3">asking ' + esc(friend.name) + '…</div>';
+    const pub = await social.viewStats(friend.code);
+    if (pub && pub.stats) { if (pub.name) profile.addFriend({ code: friend.code, name: pub.name, color: pub.color }); fillStats(`📊 ${pub.name || friend.name}'s stats`, pub.stats); }
+    else fillStats(`📊 ${friend.name}'s stats`, null), $('statsGrid').insertAdjacentHTML('afterbegin', '<div class="note" style="grid-column:1/3;color:#e08a8a">offline — showing nothing to share</div>');
+  }
+  $('btnStats').onclick = () => { fillStats('📊 YOUR STATS', profile.stats); show('statsPanel', true); };
+  $('btnStatsClose').onclick = () => show('statsPanel', false);
+
   refreshWho();
+  social.start();
 }
 
-async function join(mode, role, code) {
+async function join(mode, role, code, isPrivate = false) {
   sfx.resume();
   if (!profile.name) profile.name = role === 'teacher' ? 'Teacher' : 'Student' + ((Math.random() * 90 + 10) | 0);
   refreshWho();
   S.myRole = role;
-  S.code = mode === 'join' ? code
-    : Array.from({ length: 4 }, () => 'ABCDEFGHJKMNPQRSTUVWXYZ'[(Math.random() * 23) | 0]).join('');
-  if (mode === 'join' && (!code || code.length !== 4)) { toast('Enter a 4-letter code', 'red'); return; }
+  S.code = mode === 'join' ? code : makeCode(6);
+  if (mode === 'join' && !validCode(code, 6)) { toast('Enter the 6-letter classroom code', 'red'); return; }
+  // Private classroom: only the host's friends are admitted. The flag lives on
+  // the host (the creator); joiners learn they're blocked via a `deny` event.
+  S.private = mode === 'create' && isPrivate;
+  S.blocked = new Set();
   // Transport pick: solo is always local; otherwise prefer a configured
   // Supabase project, else the zero-setup public MQTT broker for real internet
   // play, else same-browser rooms. `?net=` forces one for testing.
@@ -287,17 +387,18 @@ async function join(mode, role, code) {
   const attach = net => {
     S.net = net; bots.net = net; S.myId = net.id;
     net.onEvent(onEvent);
-    net.onRoster(r => { S.roster = r; if (S.phase === 'lobby') refreshLobby(); });
+    net.onRoster(r => { S.roster = r; enforcePrivacy(); if (S.phase === 'lobby') refreshLobby(); });
   };
+  const meInfo = { name: profile.name, role, color: profile.color, code: profile.uid };
   attach(makeNet(netMode));
-  try { await S.net.join(S.code, { name: profile.name, role, color: profile.color }); }
+  try { await S.net.join(S.code, meInfo); }
   catch (e) {
     // If the online broker can't be reached, don't strand the player — drop to
     // same-browser rooms so they can still play across tabs of this browser.
     if ((netMode === 'p2p' || netMode === 'online') && !P.get('net')) {
       toast('Online unreachable — using same-browser rooms', 'red');
       attach(makeNet('bc'));
-      try { await S.net.join(S.code, { name: profile.name, role, color: profile.color }); }
+      try { await S.net.join(S.code, meInfo); }
       catch (e2) { toast(e2.message, 'red'); return; }
     } else { toast(e.message, 'red'); return; }
   }
@@ -312,20 +413,43 @@ async function join(mode, role, code) {
   S.phase = 'lobby';
   refreshLobby();
 }
+// Host of a PRIVATE room admits only its friends: any other real player is
+// denied (kicked back to the menu) and dropped from the roster.
+function enforcePrivacy() {
+  if (!S.private || !S.net || !S.net.isHost()) return;
+  for (const p of S.roster) {
+    if (p.id === S.myId || p.bot) continue;
+    if (!(p.code && profile.isFriend(p.code)) && !S.blocked.has(p.id)) {
+      S.blocked.add(p.id);
+      S.net.send('deny', { target: p.id });
+    }
+  }
+}
+// Leave the current room and return to the menu (used when denied from a
+// private room, or on a normal exit).
+function leaveRoom(msg) {
+  try { if (S.net) S.net.leave(); } catch { /* already gone */ }
+  clearRound();
+  S.net = null; S.phase = 'menu'; S.roster = []; S.private = false;
+  ['lobby', 'results', 'sheet', 'teachBar'].forEach(i => show(i, false));
+  show('menu', true);
+  if (msg) toast(msg, 'red');
+}
 function refreshLobby() {
   show('lobby', true);
   $('roomCodeBig').textContent = S.code;
+  $('lobbyPrivate').textContent = S.private ? '🔒 PRIVATE — only your friends can join' : '';
   const r = $('roster'); r.innerHTML = '';
-  for (const p of S.roster) {
+  for (const p of seatable()) {
     const d = document.createElement('div');
     d.innerHTML = `<span><span class="rosterDot" style="background:${colorHex(p.color)}"></span>${p.name}${p.bot ? ' 🤖' : ''}</span><span class="dim">${p.role}</span>`;
     r.appendChild(d);
   }
-  const t = S.roster.filter(p => p.role === 'teacher').length, st = students().length;
-  $('btnStart').disabled = !(t === 1 && st >= 1 && S.net.isHost());
+  const tc = seatable().filter(p => p.role === 'teacher').length, st = students().length;
+  $('btnStart').disabled = !(tc === 1 && st >= 1 && S.net.isHost());
   $('lobbyHint').textContent =
-    t === 0 ? 'Waiting for a Teacher to join…' :
-    t > 1 ? 'Too many teachers — only one allowed!' :
+    tc === 0 ? 'Waiting for a Teacher to join…' :
+    tc > 1 ? 'Too many teachers — only one allowed!' :
     st === 0 ? 'Waiting for at least one Student…' :
     S.net.isHost() ? `${st} student${st > 1 ? 's' : ''} + 1 teacher — ready!` : 'Waiting for the host to start…';
 }
@@ -339,7 +463,7 @@ function backToLobby() {
 // ---------------------------------------------------------------- host logic
 function hostStart() {
   if (!S.net.isHost()) return;
-  const t = S.roster.filter(p => p.role === 'teacher'), st = students();
+  const t = seatable().filter(p => p.role === 'teacher'), st = students();
   if (t.length !== 1 || st.length < 1) return;
   const seats = {};
   st.slice(0, 9).forEach((p, i) => (seats[p.id] = i));
@@ -466,6 +590,7 @@ function logBurst(pid, kind) {
 function onEvent(ev) {
   const { type, data, from } = ev;
   switch (type) {
+    case 'deny': if (data.target === S.myId) leaveRoom("🔒 That's a private classroom — only the host's friends can join."); break;
     case 'start': startRound(data); break;
     case 'phase': setPhase(data.phase, data.endsAt); break;
     case 'deal': {
@@ -1077,7 +1202,7 @@ function computePrompt() {
   } else if (!isTeacher() && seat != null && !S.expelled[S.myId]) {
     // FREEFORM CHEATING: aim at a thing → draw on it, or read what's on it.
     const exam = S.phase === 'exam';
-    const draw = (title, ev) => openScribbler(title, p => S.net.send(ev.type, { ...ev.data, img: p.img, marks: p.marks }));
+    const draw = (title, ev) => openScribbler(title, p => { if (p.marks && p.marks.length) profile.bump('shared', p.marks.length); S.net.send(ev.type, { ...ev.data, img: p.img, marks: p.marks }); });
     // 1) read a cheat note you can reach. Notes at your desk (incl. ones hidden
     //    under it during prep) are yours to read; others' are swipeable only
     //    while roaming, and hidden notes only ever belong to their desk's owner.
@@ -1329,8 +1454,16 @@ function showResults(data) {
   ['viewer', 'scrib', 'help', 'howto'].forEach(i => show(i, false));   // clear any leftover popup
   resultTimers.forEach(clearTimeout); resultTimers = [];
   const iWin = isTeacher() ? !data.pass : data.pass;
-  // count the round once, locally, for the menu stats line
-  if (!S.roundCounted) { S.roundCounted = true; profile.addRound(iWin); refreshWho(); }
+  // count the round once, locally, for the all-time stats + achievements
+  if (!S.roundCounted) {
+    S.roundCounted = true;
+    const caught = !isTeacher() && (S.strikes[S.myId] | 0) > 0;
+    const expelled = !isTeacher() && !!S.expelled[S.myId];
+    const unlocked = profile.recordRound({ win: iWin, role: S.myRole, clean: iWin && !isTeacher() && !caught, caught, expelled });
+    refreshWho();
+    // celebrate any newly earned achievements, one after another
+    unlocked.forEach((a, i) => setTimeout(() => { banner(`🏅 ACHIEVEMENT — ${a.icon} ${a.name}`, 3200); sfx.bell && sfx.bell(); }, 1200 + i * 1600));
+  }
 
   // the ceremony builds suspense: title + rows reveal one-by-one on a drumroll,
   // scores tick up, then the verdict lands
@@ -1384,6 +1517,14 @@ window.__game = {
   skipPhase() { if (S.net && S.net.isHost()) S.phaseEnds = 0; },
   look(yaw, pitch) { S.yaw = yaw; S.pitch = pitch || 0; },
   interact() { if (S.prompt) S.prompt.run(); },
+  // friends / stats / private-room test hooks
+  enforce: () => enforcePrivacy(),
+  addFriend: f => profile.addFriend(f),
+  isFriend: c => profile.isFriend(c),
+  friends: () => profile.friends,
+  recordRound: o => profile.recordRound(o),
+  stats: () => profile.stats,
+  achievements: () => profile.achievements(),
   act, accuse: id => S.net.send('accuse', { target: id }),
   answer: (q, a) => setAnswer(q, a),
   teleport: (x, z) => { S.me.x = x; S.me.z = z; },

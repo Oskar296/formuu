@@ -18,7 +18,7 @@ export const onlineAvailable = () => !!(SUPABASE_URL && SUPABASE_ANON_KEY && win
 export const p2pAvailable = () => !!window.mqtt;
 // Free public brokers (WSS, reachable from an https page). We namespace topics
 // so unrelated demos on the same broker never collide with our rooms.
-const MQTT_BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://test.mosquitto.org:8081'];
+export const MQTT_BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://test.mosquitto.org:8081'];
 
 class BaseNet {
   constructor() { this.id = makeId(); this.handlers = []; this.rosterHandlers = []; this.roster = []; }
@@ -78,7 +78,7 @@ export class SupabaseNet extends BaseNet {
     this.chan = this.client.channel('exam:' + code, { config: { presence: { key: this.id }, broadcast: { self: false } } });
     this.chan.on('presence', { event: 'sync' }, () => {
       this.roster = Object.values(this.chan.presenceState()).map(m => m[0])
-        .map(({ id, name, role, skin, joinedAt }) => ({ id, name, role, skin, joinedAt }));
+        .map(({ id, name, role, color, code, skin, joinedAt }) => ({ id, name, role, color, code, skin, joinedAt }));
       this.emitRoster();
     });
     this.chan.on('broadcast', { event: 'e' }, ({ payload }) => this.emit(payload));
