@@ -63,7 +63,86 @@ function applyFov() {
   camera.fov = Math.max(14, Math.min(120, 2 * Math.atan(Math.tan(h * DEG / 2) / camera.aspect) / DEG));
   camera.updateProjectionMatrix();
 }
-function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; applyFov(); }
+// ---- post-processing bloom (self-contained, core three r123 only) -----------
+// Windows and ceiling lights are the brightest things in the scene; bloom bleeds
+// their glow softly into neighbouring pixels for a lit, filmic feel. The whole
+// pipeline is hand-rolled with render targets + fullscreen shader passes so no
+// external addons need vendoring against this old three revision. Output stays
+// linear (the renderer uses default LinearEncoding), so the base image is
+// pixel-identical to before — bloom is added strictly on top.
+const bloom = (() => {
+  try {
+    const rtOpt = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat };
+    const sceneRT = new THREE.WebGLRenderTarget(2, 2, { ...rtOpt, depthBuffer: true, stencilBuffer: false });
+    const rtA = new THREE.WebGLRenderTarget(2, 2, { ...rtOpt, depthBuffer: false });
+    const rtB = new THREE.WebGLRenderTarget(2, 2, { ...rtOpt, depthBuffer: false });
+    const fsScene = new THREE.Scene();
+    const fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
+    fsScene.add(quad);
+    const VS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
+    const bright = new THREE.ShaderMaterial({ toneMapped: false, uniforms: {
+        tDiffuse: { value: null }, threshold: { value: 0.72 } },
+      vertexShader: VS, fragmentShader: `
+        uniform sampler2D tDiffuse; uniform float threshold; varying vec2 vUv;
+        void main(){
+          vec3 c = texture2D(tDiffuse, vUv).rgb;
+          float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+          float f = max(0.0, l - threshold) / max(l, 1e-4);
+          gl_FragColor = vec4(c * f, 1.0);
+        }` });
+    const blur = new THREE.ShaderMaterial({ toneMapped: false, uniforms: {
+        tDiffuse: { value: null }, dir: { value: new THREE.Vector2() } },
+      vertexShader: VS, fragmentShader: `
+        uniform sampler2D tDiffuse; uniform vec2 dir; varying vec2 vUv;
+        void main(){
+          vec3 s = texture2D(tDiffuse, vUv).rgb * 0.227027;
+          s += texture2D(tDiffuse, vUv + dir * 1.3846).rgb * 0.316216;
+          s += texture2D(tDiffuse, vUv - dir * 1.3846).rgb * 0.316216;
+          s += texture2D(tDiffuse, vUv + dir * 3.2308).rgb * 0.070270;
+          s += texture2D(tDiffuse, vUv - dir * 3.2308).rgb * 0.070270;
+          gl_FragColor = vec4(s, 1.0);
+        }` });
+    const comp = new THREE.ShaderMaterial({ toneMapped: false, uniforms: {
+        tScene: { value: sceneRT.texture }, tBloom: { value: null }, strength: { value: 0.85 } },
+      vertexShader: VS, fragmentShader: `
+        uniform sampler2D tScene; uniform sampler2D tBloom; uniform float strength; varying vec2 vUv;
+        void main(){
+          vec3 base = texture2D(tScene, vUv).rgb;
+          vec3 glow = texture2D(tBloom, vUv).rgb;
+          gl_FragColor = vec4(base + glow * strength, 1.0);
+        }` });
+    const size = new THREE.Vector2(), pass = (mat, target) => {
+      quad.material = mat; renderer.setRenderTarget(target); renderer.render(fsScene, fsCam);
+    };
+    return {
+      resize() {
+        renderer.getDrawingBufferSize(size);
+        const w = Math.max(2, size.x | 0), h = Math.max(2, size.y | 0);
+        sceneRT.setSize(w, h);
+        rtA.setSize(w >> 1, h >> 1); rtB.setSize(w >> 1, h >> 1);
+      },
+      render() {
+        renderer.setRenderTarget(sceneRT); renderer.clear(); renderer.render(scene, camera);
+        // bright-pass into rtA (half res)
+        bright.uniforms.tDiffuse.value = sceneRT.texture; pass(bright, rtA);
+        // separable gaussian, two ping-pong iterations for a wide soft glow
+        const tx = 1 / (rtA.width || 2), ty = 1 / (rtA.height || 2);
+        for (let i = 0; i < 2; i++) {
+          blur.uniforms.tDiffuse.value = rtA.texture; blur.uniforms.dir.value.set(tx, 0); pass(blur, rtB);
+          blur.uniforms.tDiffuse.value = rtB.texture; blur.uniforms.dir.value.set(0, ty); pass(blur, rtA);
+        }
+        comp.uniforms.tBloom.value = rtA.texture;
+        renderer.setRenderTarget(null); pass(comp, null);
+      },
+    };
+  } catch (e) { console.warn('bloom disabled:', e); return null; }
+})();
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; applyFov();
+  if (bloom) bloom.resize();
+}
 addEventListener('resize', resize); resize();
 lights(scene);
 const applyEnv = mapId => { scene.environment = mapId === 'detention' ? ENV_NIGHT : ENV_DAY; };
@@ -1223,7 +1302,7 @@ function frame(nowMs) {
   const tp2 = inDanger && S.teacherId !== S.myId ? S.poses[S.teacherId] : null;
   $('tnear').style.opacity = tp2 && Math.hypot(tp2.x - S.me.x, tp2.z - S.me.z) < 3.0 ? 1 : 0;
 
-  renderer.render(scene, camera);
+  if (bloom) bloom.render(); else renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
 
