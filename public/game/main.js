@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { buildWorld, MAPS, lights, collide, setAniso, DESKS, TEACHER_DESK, BOARD, STOOL, ROOM, seatAdjacent } from './src/classroom.js';
 import { makeFigure, bakeFigure } from './src/figure.js';
 import { generateExam, dealKnowledge, score, N_QUESTIONS, LETTERS } from './src/exam.js';
-import { makeNet, onlineAvailable, makeId } from './src/net.js';
+import { makeNet, onlineAvailable, p2pAvailable, makeId } from './src/net.js';
 import { makeBots, BotBrain } from './src/bots.js';
 import { profile, COLORS, colorHex } from './src/profile.js';
 import { sfx } from './src/audio.js';
@@ -250,8 +250,8 @@ function refreshWho() {
   $('btnJoin').onclick = () => join('join', role, $('codeInput').value.trim().toUpperCase());
   $('btnStart').onclick = () => hostStart();
   $('btnAgain').onclick = () => { show('results', false); backToLobby(); };
-  $('netNote').textContent = onlineAvailable()
-    ? 'Online rooms enabled — share the code with friends anywhere.'
+  $('netNote').textContent = (onlineAvailable() || p2pAvailable())
+    ? 'Online rooms enabled — share the 4-letter code with friends on any device, anywhere.'
     : 'Local mode: rooms work across TABS of this browser. Solo works everywhere.';
   $('soundBtn').onclick = () => ($('soundBtn').textContent = sfx.toggle() ? '🔇' : '🔊');
   // settings: username + color
@@ -279,14 +279,28 @@ async function join(mode, role, code) {
   S.code = mode === 'join' ? code
     : Array.from({ length: 4 }, () => 'ABCDEFGHJKMNPQRSTUVWXYZ'[(Math.random() * 23) | 0]).join('');
   if (mode === 'join' && (!code || code.length !== 4)) { toast('Enter a 4-letter code', 'red'); return; }
-  const netMode = mode === 'solo' ? 'local' : P.get('net') || (onlineAvailable() ? 'online' : 'bc');
-  S.net = makeNet(netMode);
-  bots.net = S.net;
-  S.myId = S.net.id;
-  S.net.onEvent(onEvent);
-  S.net.onRoster(r => { S.roster = r; if (S.phase === 'lobby') refreshLobby(); });
+  // Transport pick: solo is always local; otherwise prefer a configured
+  // Supabase project, else the zero-setup public MQTT broker for real internet
+  // play, else same-browser rooms. `?net=` forces one for testing.
+  const netMode = mode === 'solo' ? 'local'
+    : P.get('net') || (onlineAvailable() ? 'online' : p2pAvailable() ? 'p2p' : 'bc');
+  const attach = net => {
+    S.net = net; bots.net = net; S.myId = net.id;
+    net.onEvent(onEvent);
+    net.onRoster(r => { S.roster = r; if (S.phase === 'lobby') refreshLobby(); });
+  };
+  attach(makeNet(netMode));
   try { await S.net.join(S.code, { name: profile.name, role, color: profile.color }); }
-  catch (e) { toast(e.message, 'red'); return; }
+  catch (e) {
+    // If the online broker can't be reached, don't strand the player — drop to
+    // same-browser rooms so they can still play across tabs of this browser.
+    if ((netMode === 'p2p' || netMode === 'online') && !P.get('net')) {
+      toast('Online unreachable — using same-browser rooms', 'red');
+      attach(makeNet('bc'));
+      try { await S.net.join(S.code, { name: profile.name, role, color: profile.color }); }
+      catch (e2) { toast(e2.message, 'red'); return; }
+    } else { toast(e.message, 'red'); return; }
+  }
   if (mode === 'solo') {
     S.net.addBots(role === 'teacher' ? makeBots(9, 'student', profile.color)
       : [...makeBots(1, 'teacher', profile.color), ...makeBots(8, 'student', profile.color)]);
