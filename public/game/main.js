@@ -229,6 +229,7 @@ function refreshWho() {
   const st = profile.stats;
   $('statLine').textContent = st.rounds ? `🎓 ${st.rounds} round${st.rounds > 1 ? 's' : ''} played · ${st.wins} won` : '';
 }
+let social = null;   // the always-on friends/stats layer (assigned at menu init)
 {
   let role = 'student';
   $('roleStudent').onclick = () => { role = 'student'; $('roleStudent').classList.add('sel'); $('roleTeacher').classList.remove('sel'); };
@@ -271,10 +272,10 @@ function refreshWho() {
     }
     show('settings', true);
   };
-  $('btnSettingsDone').onclick = () => { profile.name = $('setName').value; refreshWho(); show('settings', false); };
+  $('btnSettingsDone').onclick = () => { profile.name = $('setName').value; refreshWho(); if (social) social.publishStats(); show('settings', false); };
 
   // ---- social: friends + stats ----------------------------------------------
-  const social = makeSocial();
+  social = makeSocial();
   window.__social = social;                 // test/debug hook
   social.onFriends(() => { renderFriends(); refreshWho(); });
   social.onRequests(() => renderFriends());
@@ -283,8 +284,8 @@ function refreshWho() {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function renderFriends() {
     $('myCode').textContent = social.myCode();
-    $('socialStatus').textContent = social.online ? '🟢 online — requests deliver instantly'
-      : '🔌 connecting… (a friend must be online to receive requests)';
+    $('socialStatus').textContent = social.online ? '🟢 online — requests wait for your friends even when they’re offline'
+      : '🔌 connecting to the friends server…';
     // incoming requests
     const rs = $('reqSection'); rs.innerHTML = '';
     if (social.incoming.length) {
@@ -1461,6 +1462,7 @@ function showResults(data) {
     const expelled = !isTeacher() && !!S.expelled[S.myId];
     const unlocked = profile.recordRound({ win: iWin, role: S.myRole, clean: iWin && !isTeacher() && !caught, caught, expelled });
     refreshWho();
+    if (social) social.publishStats();   // keep the snapshot friends can read up to date
     // celebrate any newly earned achievements, one after another
     unlocked.forEach((a, i) => setTimeout(() => { banner(`🏅 ACHIEVEMENT — ${a.icon} ${a.name}`, 3200); sfx.bell && sfx.bell(); }, 1200 + i * 1600));
   }
