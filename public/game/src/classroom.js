@@ -263,8 +263,10 @@ export function buildWorld(scene, mapId = 'classroom') {
 
   // floor
   const floorMap = { classroom: plankTex(), lab: tileTex(), gym: courtTex(), library: carpetTex(), detention: plankTex(96, 14) }[mapId];
+  // hard floors get a faint polished sheen; carpet stays matte
+  const floorRough = mapId === 'library' ? 0.95 : mapId === 'lab' ? 0.5 : 0.62;
   const floor = add(new THREE.Mesh(new THREE.PlaneGeometry(ROOM.x * 2 + 1, ROOM.z * 2 + 1),
-    new THREE.MeshStandardMaterial({ map: floorMap, roughness: 0.8 })));
+    new THREE.MeshStandardMaterial({ map: floorMap, roughness: floorRough, metalness: 0.0, envMapIntensity: mapId === 'library' ? 0.3 : 0.7 })));
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
 
@@ -299,12 +301,18 @@ export function buildWorld(scene, mapId = 'classroom') {
   const ceil = add(new THREE.Mesh(new THREE.PlaneGeometry(ROOM.x * 2 + 1, ROOM.z * 2 + 1), mat(night ? '#262b38' : '#f2f0e8')));
   ceil.rotation.x = Math.PI / 2; ceil.position.y = H;
 
-  // glowing ceiling light panels (dim, greenish in detention)
+  // glowing ceiling light panels
   for (const px of [-ROOM.x * 0.45, ROOM.x * 0.45]) for (const pz of [-ROOM.z * 0.42, ROOM.z * 0.42]) {
     const panel = add(new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.06, 0.9), new THREE.MeshBasicMaterial({ color: A.panel })));
     panel.position.set(px, H - 0.05, pz);
     const rim = add(new THREE.Mesh(new THREE.BoxGeometry(2.14, 0.05, 1.04), mat('#9aa0aa')));
     rim.position.set(px, H - 0.02, pz);
+  }
+  // two soft overhead glows so the panels feel like they light the room
+  for (const pz of [-ROOM.z * 0.42, ROOM.z * 0.42]) {
+    const glow = new THREE.PointLight(A.panel, night ? 3 : 4.5, H + 4, 2);
+    glow.position.set(0, H - 0.6, pz);
+    add(glow);
   }
 
   // the exam board
@@ -590,9 +598,13 @@ export function buildWorld(scene, mapId = 'classroom') {
       const sb = add(new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.78, 8), leg));
       sb.position.set(d.x + lx, 0.26, d.deskZ); sb.rotation.x = Math.PI / 2;
     }
-    const paper = add(new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.72), new THREE.MeshStandardMaterial({ map: paperTex, roughness: 0.95 })));
-    paper.rotation.x = -Math.PI / 2; paper.rotation.z = 0.06;
-    paper.position.set(d.x + 0.15, 1.115, d.deskZ + 0.02);
+    // paper sits flat and clearly ABOVE the desktop, with polygon offset so it
+    // never z-fights / clips into the desk on any map
+    const paper = add(new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.72),
+      new THREE.MeshStandardMaterial({ map: paperTex, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })));
+    paper.rotation.x = -Math.PI / 2; paper.rotation.z = 0.02;
+    paper.position.set(d.x + 0.15, 1.13, d.deskZ + 0.02);
+    paper.renderOrder = 2;
     paperMeshes.push(paper);
     // rounded water bottle: translucent body, shoulder, cap, and a label band
     const bMat = new THREE.MeshStandardMaterial({ color: bottleCol[i % bottleCol.length], roughness: 0.14, metalness: 0.05, transparent: true, opacity: 0.9 });
@@ -613,7 +625,7 @@ export function buildWorld(scene, mapId = 'classroom') {
       fl.position.set(d.x + 0.62, 1.2, d.deskZ - 0.3);
     } else if (mapId === 'library' && i % 2 === 0) {
       const bk = add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.22), mat(['#8a3a34', '#3a5a8a', '#3f7a4c'][i % 3], { roughness: 0.8 })));
-      bk.position.set(d.x + 0.6, 1.13, d.deskZ + 0.25); bk.rotation.y = 0.4;
+      bk.position.set(d.x + 0.6, 1.145, d.deskZ + 0.25); bk.rotation.y = 0.4; bk.castShadow = true;
     }
     // contoured moulded-plastic chair on a tapered metal-tube frame
     const cz = d.z + 0.15, cMat = mat(PAL.chair, { roughness: 0.5, metalness: 0.05 });

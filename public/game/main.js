@@ -398,7 +398,7 @@ function onEvent(ev) {
       } else {
         const d = DESKS[data.desk];
         if (data.hidden) { pos = [d.x + (Math.random() - 0.5) * 0.5, 0.99, d.deskZ + 0.28]; kind = 'hidden'; }
-        else { pos = [d.x + (Math.random() - 0.5) * 0.5, 1.115, d.deskZ + (Math.random() - 0.5) * 0.3]; kind = 'landed'; }
+        else { pos = [d.x + (Math.random() - 0.5) * 0.5, 1.14, d.deskZ + (Math.random() - 0.5) * 0.3]; kind = "landed"; }
       }
       S.notes.set(data.id, { ...data, kind, mesh: noteMesh(pos, !!data.hidden), owner: from });
       if (data.desk >= 0) capDeskNotes(data.desk);
@@ -414,7 +414,7 @@ function onEvent(ev) {
         // the note LANDS and stays on the desk — physical evidence
         if (targetSeat == null || S.notes.has(data.id)) return;
         const d = DESKS[targetSeat];
-        const pos = [d.x + (Math.random() - 0.5) * 0.6, 1.115, d.deskZ + (Math.random() - 0.5) * 0.3];
+        const pos = [d.x + (Math.random() - 0.5) * 0.6, 1.14, d.deskZ + (Math.random() - 0.5) * 0.3];
         S.notes.set(data.id, { id: data.id, img: data.img, marks: data.marks, desk: targetSeat, kind: 'landed', mesh: noteMesh(pos, false), owner: from });
         capDeskNotes(targetSeat);
         if (data.to === S.myId) toast('🗒 a note landed on your desk — read it!', 'gold');
