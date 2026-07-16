@@ -52,9 +52,17 @@ function load() {
   if (!(P.fovH >= 70 && P.fovH <= 130)) P.fovH = 103;
   // stable friend code / identity — minted once, then permanent for this browser
   if (!validCode(P.uid)) P.uid = makeCode(6);
+  // secret token: proves you own this account and namespaces its private state
+  // (friends list) so only your own linked devices can read/write it
+  if (typeof P.token !== 'string' || P.token.length !== 10) P.token = makeCode(10);
   if (!Array.isArray(P.friends)) P.friends = [];   // [{ code, name, color }]
   return P;
 }
+// account code = the public friend code + the secret token, e.g. ABC234-KMNP7QRS2T
+export const parseAccount = s => {
+  const m = String(s || '').toUpperCase().trim().match(/^([A-Z2-9]{6})-?([A-Z2-9]{10})$/);
+  return m ? { uid: m[1], token: m[2] } : null;
+};
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(P)); } catch { /* private mode */ } };
 
 // Read the cumulative stats as a fully-populated object (missing keys → 0).
@@ -68,9 +76,21 @@ export const profile = {
   get fovH() { return load().fovH; },
   set fovH(v) { v = Math.round(+v); if (v >= 70 && v <= 130) { load().fovH = v; save(); } },
   get uid() { return load().uid; },
+  get token() { return load().token; },
+  // the code you type on another device to sign in as this same account
+  get account() { const p = load(); return p.uid + '-' + p.token; },
+  // adopt an account on a fresh device (its friends + stats then sync in from
+  // the cloud). Local friends are kept and merged so nothing is lost.
+  setAccount(uid, token) {
+    if (!validCode(uid, 6) || typeof token !== 'string' || token.length !== 10) return false;
+    const p = load(); p.uid = uid; p.token = token; save(); return true;
+  },
 
   // ---- stats ----------------------------------------------------------------
   get stats() { return readStats(); },
+  // Overwrite the whole stats block (used when a linked device pulls the
+  // account's cloud snapshot). Only known keys are taken.
+  setStats(blob) { const p = load(); for (const k of STAT_KEYS) if (blob && typeof blob[k] === 'number') p[k] = blob[k] | 0; save(); },
   // Increment an in-round counter (answers shared/copied) by n.
   bump(key, n = 1) { if (!STAT_KEYS.includes(key)) return; const p = load(); p[key] = (p[key] | 0) + n; save(); },
   // Record a finished round; returns the list of achievements newly unlocked so
@@ -108,4 +128,6 @@ export const profile = {
     save();
   },
   removeFriend(code) { const p = load(); p.friends = p.friends.filter(f => f.code !== code); save(); },
+  // union-merge a cloud friends list into the local one (linked-device sync)
+  mergeFriends(list) { if (Array.isArray(list)) for (const f of list) this.addFriend(f); },
 };

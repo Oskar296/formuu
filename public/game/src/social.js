@@ -40,8 +40,24 @@ export function makeSocial() {
     if (client && connected) { try { client.publish(topic, obj == null ? '' : JSON.stringify(obj), { qos: 0, retain }); } catch { /* offline */ } }
   };
   const seg = (topic, i) => topic.split('/')[i];   // exam25x[0]/u[1]/<code>[2]/<kind>[3]/<sender>[4]
+  // private, token-gated topic holding THIS account's friends list, so only your
+  // own linked devices (which know the token) can read/write it
+  const privF = () => U(profile.uid) + '/' + profile.token + '/f';
+  let adopting = false, adoptTimer = null;   // true right after linking a device, until cloud state is pulled
+  // Defer finishing adoption a beat so ALL retained state (stats + friends,
+  // delivered synchronously in one subscribe batch) is merged before we
+  // re-publish — otherwise an early re-publish clobbers not-yet-read topics.
+  function scheduleFinishAdopt() { if (!adopting) return; clearTimeout(adoptTimer); adoptTimer = setTimeout(finishAdopt, 350); }
 
   function handle(topic, raw) {
+    if (topic === privF()) {                // this account's friends list from another of my devices
+      let m; try { m = JSON.parse(raw); } catch { return; }
+      if (m && Array.isArray(m.friends)) profile.mergeFriends(m.friends);
+      if (m && Array.isArray(m.out)) for (const c of m.out) if (!store.out.includes(c) && !profile.isFriend(c)) store.out.push(c);
+      persist(); fire('friends'); fire('requests');
+      if (adopting) scheduleFinishAdopt();
+      return;
+    }
     const kind = seg(topic, 3);
     if (kind === 'rq') {                    // an incoming friend request (retained or live)
       const from = seg(topic, 4);
@@ -66,10 +82,14 @@ export function makeSocial() {
       fire('friends'); fire('requests');
       return;
     }
-    if (kind === 'st') {                    // a friend's retained stats snapshot
+    if (kind === 'st') {                    // a retained stats snapshot
       const from = seg(topic, 2);
       let m; try { m = JSON.parse(raw); } catch { return; }
       if (!m || !m.code) return;
+      if (from === profile.uid) {           // my OWN account's stats (from another device)
+        if (adopting && m.stats) { profile.setStats(m.stats); scheduleFinishAdopt(); }
+        return;
+      }
       lastSeen.set(from, Date.now());
       statCache.set(from, m);
       const ws = statWaiters.get(from); if (ws) { statWaiters.delete(from); ws.forEach(r => r(m)); }
@@ -84,23 +104,32 @@ export function makeSocial() {
   }
 
   function publishStats() { send(U(profile.uid) + '/st', profile.publicProfile(), true); }
+  // the account's friends list, kept retained on the token-gated topic so every
+  // linked device converges on the same list
+  function publishFriends() { send(privF(), { friends: profile.friends, out: store.out }, true); }
 
   function announce() {                     // (re)assert my presence + retained state
-    publishStats();
+    if (adopting) return;                   // don't overwrite cloud state before we've pulled it
+    publishStats(); publishFriends();
     for (const c of store.out) send(U(c) + '/rq/' + profile.uid, me(), true);   // keep outgoing requests alive on the broker
     for (const f of profile.friends) send(U(f.code), { k: 'ping', from: me() });
   }
+  // finish adopting a linked account: stop suppressing, then publish our now-
+  // merged state so this device is fully in sync
+  function finishAdopt() { if (!adopting) return; adopting = false; announce(); fire('friends'); fire('requests'); }
 
   function connect(idx = 0) {
     if (!window.mqtt) return;               // client failed to load — stay offline
     client = window.mqtt.connect(MQTT_BROKERS[idx], {
-      clientId: 'exam-soc-' + profile.uid, clean: true, keepalive: 30, reconnectPeriod: 4000, connectTimeout: 8000,
+      clientId: 'exam-soc-' + profile.uid + '-' + ((Math.random() * 1e4) | 0), clean: true, keepalive: 30, reconnectPeriod: 4000, connectTimeout: 8000,
     });
     client.on('connect', () => {
       connected = true;
-      // wildcards pick up every retained request/accept waiting for us
-      client.subscribe([U(profile.uid), U(profile.uid) + '/rq/+', U(profile.uid) + '/ak/+'], { qos: 0 });
-      announce();
+      // wildcards pick up every retained request/accept waiting for us; own /st
+      // and the private friends topic carry this account's cloud state
+      client.subscribe([U(profile.uid), U(profile.uid) + '/rq/+', U(profile.uid) + '/ak/+', U(profile.uid) + '/st', privF()], { qos: 0 });
+      if (adopting) setTimeout(finishAdopt, 1800);   // fallback if the account has no cloud snapshot yet
+      else announce();
       fire('presence');
     });
     client.on('message', (t, payload) => handle(t, payload ? payload.toString() : ''));
@@ -124,6 +153,7 @@ export function makeSocial() {
       if (!validCode(code) || code === profile.uid || profile.isFriend(code)) return false;
       if (!store.out.includes(code)) { store.out.push(code); persist(); }
       send(U(code) + '/rq/' + profile.uid, me(), true);
+      publishFriends();
       fire('requests');
       return true;
     },
@@ -134,6 +164,7 @@ export function makeSocial() {
       send(U(code) + '/ak/' + profile.uid, me(), true);       // durable "accepted" for them
       send(U(profile.uid) + '/rq/' + code, null, true);       // clear the retained request we just answered
       send(U(code), { k: 'ping', from: me() });
+      publishFriends();                                        // sync the new friend to my other devices
       fire('friends'); fire('requests');
     },
     decline(code) {
@@ -141,7 +172,20 @@ export function makeSocial() {
       send(U(profile.uid) + '/rq/' + code, null, true);       // clear it so it doesn't come back on reconnect
       fire('requests');
     },
-    unfriend(code) { profile.removeFriend(code); fire('friends'); },
+    unfriend(code) { profile.removeFriend(code); publishFriends(); fire('friends'); },
+    // ---- cross-device account linking ----------------------------------------
+    myAccount() { return profile.account; },
+    // sign this device in as an existing account (from its account code); the
+    // account's friends + stats then sync in from the cloud
+    relink(uid, token) {
+      if (!profile.setAccount(uid, token)) return false;
+      store = { out: [], in: [] }; persist();     // old identity's pending items don't carry over
+      statCache.clear(); lastSeen.clear();
+      adopting = true;
+      try { if (client) client.end(true); } catch { /* */ }
+      connected = false; connect(0);
+      return true;
+    },
     // view a friend's stats: prefer their retained snapshot (works while they're
     // offline); fall back to cache, and nudge them for a fresh copy if online.
     viewStats(code, timeout = 3000) {

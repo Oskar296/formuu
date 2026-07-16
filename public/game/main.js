@@ -4,7 +4,7 @@ import { makeFigure, bakeFigure } from './src/figure.js';
 import { generateExam, dealKnowledge, score, N_QUESTIONS, LETTERS } from './src/exam.js';
 import { makeNet, onlineAvailable, p2pAvailable, makeId } from './src/net.js';
 import { makeBots, BotBrain } from './src/bots.js';
-import { profile, COLORS, colorHex, makeCode, validCode, achievementsFor } from './src/profile.js';
+import { profile, COLORS, colorHex, makeCode, validCode, achievementsFor, parseAccount } from './src/profile.js';
 import { makeSocial } from './src/social.js';
 import { sfx } from './src/audio.js';
 
@@ -284,6 +284,7 @@ let social = null;   // the always-on friends/stats layer (assigned at menu init
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function renderFriends() {
     $('myCode').textContent = social.myCode();
+    $('myAccount').textContent = social.myAccount();
     $('socialStatus').textContent = social.online ? '🟢 online — requests wait for your friends even when they’re offline'
       : '🔌 connecting to the friends server…';
     // incoming requests
@@ -326,6 +327,19 @@ let social = null;   // the always-on friends/stats layer (assigned at menu init
   $('btnFriends').onclick = () => { renderFriends(); show('friends', true); };
   $('btnFriendsClose').onclick = () => show('friends', false);
   $('myCode').onclick = () => { try { navigator.clipboard.writeText(social.myCode()); toast('📋 friend code copied'); } catch { /* no clipboard */ } };
+  $('myAccount').onclick = () => { try { navigator.clipboard.writeText(social.myAccount()); toast('📋 account code copied — keep it private'); } catch { /* no clipboard */ } };
+  $('btnLink').onclick = () => {
+    const acc = parseAccount($('linkInput').value);
+    if (!acc) { toast('that account code doesn’t look right', 'red'); return; }
+    if (acc.uid === social.myCode()) { toast('this device is already that account', 'red'); return; }
+    if (!confirm('Sign this device in as that account? Your current friends & stats on THIS device stay, and the account’s cloud friends & stats sync in.')) return;
+    if (social.relink(acc.uid, acc.token)) {
+      $('linkInput').value = '';
+      toast('🔗 linked — syncing your account…', 'gold');
+      refreshWho();
+      setTimeout(() => { renderFriends(); refreshWho(); }, 2200);
+    } else toast('could not link — check the code', 'red');
+  };
   $('btnAddFriend').onclick = () => {
     const c = $('friendCodeInput').value.trim().toUpperCase();
     if (c === social.myCode()) { toast("that's your own code", 'red'); return; }
@@ -1527,6 +1541,8 @@ window.__game = {
   recordRound: o => profile.recordRound(o),
   stats: () => profile.stats,
   achievements: () => profile.achievements(),
+  account: () => profile.account,
+  relink: (u, t) => social && social.relink(u, t),
   act, accuse: id => S.net.send('accuse', { target: id }),
   answer: (q, a) => setAnswer(q, a),
   teleport: (x, z) => { S.me.x = x; S.me.z = z; },
