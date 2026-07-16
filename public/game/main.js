@@ -173,6 +173,13 @@ const isTeacher = () => S.myRole === 'teacher';
 // the roster everywhere so they can never be seated or counted.
 const seatable = () => S.roster.filter(p => !(S.blocked && S.blocked.has(p.id)));
 const students = () => seatable().filter(p => p.role === 'student');
+// Roles are RANDOM: nobody picks — the host draws one player as the teacher at
+// start. Roster entries carry no real role until then, so derive it from
+// S.teacherId (and re-derive after every presence refresh, which rebuilds the
+// roster objects). Before a round starts everyone counts as a student.
+function normRoles() {
+  for (const p of S.roster) p.role = S.teacherId && p.id === S.teacherId ? 'teacher' : 'student';
+}
 const nameOf = id => (S.roster.find(p => p.id === id) || {}).name || '???';
 const mySeat = () => S.seats[S.myId];
 const inRiot = () => now() < S.riotUntil;
@@ -231,9 +238,6 @@ function refreshWho() {
 }
 let social = null;   // the always-on friends/stats layer (assigned at menu init)
 {
-  let role = 'student';
-  $('roleStudent').onclick = () => { role = 'student'; $('roleStudent').classList.add('sel'); $('roleTeacher').classList.remove('sel'); };
-  $('roleTeacher').onclick = () => { role = 'teacher'; $('roleTeacher').classList.add('sel'); $('roleStudent').classList.remove('sel'); };
   S.mapSel = 'random';
   [...$('mapRow').children].forEach(b => (b.onclick = () => {
     S.mapSel = b.dataset.map;
@@ -250,9 +254,9 @@ let social = null;   // the always-on friends/stats layer (assigned at menu init
   }));
   $('btnHow').onclick = () => show('howto', true);
   $('btnHowClose').onclick = () => show('howto', false);
-  $('btnSolo').onclick = () => join('solo', role);
-  $('btnCreate').onclick = () => join('create', role, null, $('privChk').checked);
-  $('btnJoin').onclick = () => join('join', role, $('codeInput').value.trim().toUpperCase());
+  $('btnSolo').onclick = () => join('solo');
+  $('btnCreate').onclick = () => join('create', null, $('privChk').checked);
+  $('btnJoin').onclick = () => join('join', $('codeInput').value.trim().toUpperCase());
   $('btnStart').onclick = () => hostStart();
   $('btnAgain').onclick = () => { show('results', false); backToLobby(); };
   $('netNote').textContent = (onlineAvailable() || p2pAvailable())
@@ -400,11 +404,12 @@ let social = null;   // the always-on friends/stats layer (assigned at menu init
   social.start();
 }
 
-async function join(mode, role, code, isPrivate = false) {
+async function join(mode, code, isPrivate = false) {
   sfx.resume();
-  if (!profile.name) profile.name = role === 'teacher' ? 'Teacher' : 'Student' + ((Math.random() * 90 + 10) | 0);
+  if (!profile.name) profile.name = 'Student' + ((Math.random() * 90 + 10) | 0);
   refreshWho();
-  S.myRole = role;
+  S.myRole = null;   // decided randomly by the host when the round starts
+  S.teacherId = null;
   S.code = mode === 'join' ? code : makeCode(6);
   if (mode === 'join' && !validCode(code, 6)) { toast('Enter the 6-letter classroom code', 'red'); return; }
   // Private classroom: only the host's friends are admitted. The flag lives on
@@ -419,9 +424,9 @@ async function join(mode, role, code, isPrivate = false) {
   const attach = net => {
     S.net = net; bots.net = net; S.myId = net.id;
     net.onEvent(onEvent);
-    net.onRoster(r => { S.roster = r; enforcePrivacy(); if (S.phase === 'lobby') refreshLobby(); });
+    net.onRoster(r => { S.roster = r; normRoles(); enforcePrivacy(); if (S.phase === 'lobby') refreshLobby(); });
   };
-  const meInfo = { name: profile.name, role, color: profile.color, code: profile.uid };
+  const meInfo = { name: profile.name, role: 'player', color: profile.color, code: profile.uid };
   attach(makeNet(netMode));
   try { await S.net.join(S.code, meInfo); }
   catch (e) {
@@ -435,8 +440,8 @@ async function join(mode, role, code, isPrivate = false) {
     } else { toast(e.message, 'red'); return; }
   }
   if (mode === 'solo') {
-    S.net.addBots(role === 'teacher' ? makeBots(9, 'student', profile.color)
-      : [...makeBots(1, 'teacher', profile.color), ...makeBots(8, 'student', profile.color)]);
+    // 9 bots + you = a full class of 10; whoever draws teacher, the rest fill the seats
+    S.net.addBots(makeBots(9, 'student', profile.color));
     show('menu', false);
     setTimeout(() => hostStart(), 150);
     return;
@@ -487,7 +492,7 @@ function refreshLobby() {
   for (const p of seatable()) {
     const d = document.createElement('div');
     const you = p.id === S.myId ? ' <span class="dim">(you)</span>' : '';
-    d.innerHTML = `<span><span class="rosterDot" style="background:${colorHex(p.color)}"></span>${p.name}${p.bot ? ' 🤖' : ''}${you}</span><span class="dim">${p.role}</span>`;
+    d.innerHTML = `<span><span class="rosterDot" style="background:${colorHex(p.color)}"></span>${p.name}${p.bot ? ' 🤖' : ''}${you}</span><span class="dim">🎲</span>`;
     r.appendChild(d);
   }
   // colour picker: colours held by OTHER players are locked out
@@ -506,16 +511,16 @@ function refreshLobby() {
       cg.appendChild(d);
     }
   }
-  const tc = seatable().filter(p => p.role === 'teacher').length, st = students().length;
-  $('btnStart').disabled = !(tc === 1 && st >= 1 && S.net.isHost());
+  // roles are random: any 2+ players can start; one of them is drawn as teacher
+  const n = seatable().length;
+  $('btnStart').disabled = !(n >= 2 && S.net.isHost());
   $('lobbyHint').textContent =
-    tc === 0 ? 'Waiting for a Teacher to join…' :
-    tc > 1 ? 'Too many teachers — only one allowed!' :
-    st === 0 ? 'Waiting for at least one Student…' :
-    S.net.isHost() ? `${st} student${st > 1 ? 's' : ''} + 1 teacher — ready!` : 'Waiting for the host to start…';
+    n < 2 ? 'Waiting for players — need at least 2. 🎲 One of you is randomly the TEACHER!' :
+    S.net.isHost() ? `${n} players — 🎲 the teacher is drawn at random. Ready!` : 'Waiting for the host to start… 🎲 roles are random!';
 }
 function backToLobby() {
   S.phase = 'lobby'; S.resultsSent = false;
+  S.teacherId = null; S.myRole = null; normRoles();   // fresh random draw next round
   clearRound();
   if (S.roster.some(p => p.bot)) { setTimeout(() => hostStart(), 400); return; }
   refreshLobby();
@@ -524,13 +529,21 @@ function backToLobby() {
 // ---------------------------------------------------------------- host logic
 function hostStart() {
   if (!S.net.isHost()) return;
-  const t = seatable().filter(p => p.role === 'teacher'), st = students();
-  if (t.length !== 1 || st.length < 1) return;
+  const ps = seatable();
+  if (ps.length < 2) return;
+  // ONE random player becomes the teacher — nobody chooses. (?role= is honoured
+  // only in solo auto-test mode so automated tests stay deterministic.)
+  const forced = P.get('auto') === 'solo' ? P.get('role') : null;
+  let teacher;
+  if (forced === 'teacher') teacher = ps.find(p => p.id === S.myId);
+  else if (forced === 'student') { const o = ps.filter(p => p.id !== S.myId); teacher = o[(Math.random() * o.length) | 0]; }
+  else teacher = ps[(Math.random() * ps.length) | 0];
+  const st = ps.filter(p => p.id !== teacher.id);
   const seats = {};
   st.slice(0, 9).forEach((p, i) => (seats[p.id] = i));
   const ids = Object.keys(MAPS);
   const map = P.get('map') || (S.mapSel === 'random' || !MAPS[S.mapSel] ? ids[(Math.random() * ids.length) | 0] : S.mapSel);
-  S.net.send('start', { seed: +(P.get('seed') || (Math.random() * 1e9 | 0)), seats, teacherId: t[0].id, map, diff: S.diffSel || 'normal' });
+  S.net.send('start', { seed: +(P.get('seed') || (Math.random() * 1e9 | 0)), seats, teacherId: teacher.id, map, diff: S.diffSel || 'normal' });
 }
 function hostPhase(phase) {
   const endsAt = Date.now() + DUR[phase] / TSCALE * 1000;
@@ -845,6 +858,11 @@ function handleVerdict(v) {
 // ---------------------------------------------------------------- round lifecycle
 function startRound(data) {
   S.seed = data.seed; S.seats = data.seats; S.teacherId = data.teacherId;
+  // the role draw lands HERE: whoever the host drew is the teacher this round
+  S.myRole = data.teacherId === S.myId ? 'teacher' : 'student';
+  normRoles();
+  banner(S.myRole === 'teacher' ? '🎲 You drew 🧑‍🏫 THE TEACHER — catch them cheating!'
+    : '🎲 You drew 🙋 STUDENT — cheat and don\'t get caught!', 3200);
   S.diff = data.diff || 'normal'; S.roundCounted = false; S.warned30 = false;
   if (room.mapId !== (data.map || 'classroom')) { room = buildWorld(scene, data.map || 'classroom'); applyEnv(room.mapId); }
   buildRigSpots();
@@ -1565,7 +1583,7 @@ function showResults(data) {
 
 // ---------------------------------------------------------------- boot + test hooks
 show('menu', true);
-if (P.get('auto') === 'solo') { if (P.get('name')) profile.name = P.get('name'); if (P.get('role') === 'teacher') $('roleTeacher').click(); $('btnSolo').click(); }
+if (P.get('auto') === 'solo') { if (P.get('name')) profile.name = P.get('name'); $('btnSolo').click(); }
 
 window.__game = {
   get S() { return S; },
