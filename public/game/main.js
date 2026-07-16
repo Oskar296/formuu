@@ -900,7 +900,6 @@ function setPhase(phase, endsAt) {
   show('teachBar', isTeacher() && (phase === 'inspect' || phase === 'exam'));
   show('crosshair', true); show('helpTip', true);
   showRigSpots(phase === 'prep' && stud);
-  $('phaseLabel').textContent = phase === 'prep' ? 'PREP — RIG THE ROOM' : phase === 'inspect' ? 'INSPECTION' : phase === 'exam' ? 'THE EXAM — DO NOT GET CAUGHT' : phase.toUpperCase();
   if (phase === 'inspect' || phase === 'exam') sfx.bell();
   if (phase === 'exam') {
     banner(S.exam ? `📝 Subject: the Republic of ${S.exam.country}` : '📝 BEGIN!', 3000);

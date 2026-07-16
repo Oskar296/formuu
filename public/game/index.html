@@ -108,7 +108,6 @@
   .hud { position: fixed; z-index: 20; pointer-events: none; }
   #topbar { top: 12px; left: 50%; transform: translateX(-50%); text-align: center;
     background: rgba(14,16,24,.62); border-radius: 12px; padding: 5px 20px; backdrop-filter: blur(4px); }
-  #phaseLabel { font-size: 9.5px; letter-spacing: 3px; opacity: .65; }
   #phaseTimer { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
   #phaseTimer.urgent { color: #ff8a7a; animation: urg .8s ease-in-out infinite; }
   @keyframes urg { 50% { opacity: .55; } }
@@ -362,7 +361,7 @@
 </div>
 
 <!-- HUD -->
-<div class="hud" id="topbar"><div id="phaseLabel">—</div><div id="phaseTimer">–:––</div></div>
+<div class="hud" id="topbar"><div id="phaseTimer">–:––</div></div>
 <div class="hud hidden" id="crosshair"></div>
 <div class="hud hidden" id="prompt"></div>
 <div class="hud" id="banner"></div>
