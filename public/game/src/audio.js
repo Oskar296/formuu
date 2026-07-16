@@ -3,7 +3,7 @@
 // room is a murmur, not a foghorn. A soft attack kills speaker clicks and a
 // global throttle stops nine bots from turning the room into a drum solo.
 let ctx = null, muted = false, ringTimer = 0;
-const MASTER = 0.7;
+let MASTER = 0.7;   // runtime master volume (settings slider)
 const ac = () => (ctx ||= new (window.AudioContext || window.webkitAudioContext)());
 let recent = [];
 function tone(f, d, type, v, slide = 1, delay = 0) {
@@ -26,6 +26,10 @@ function tone(f, d, type, v, slide = 1, delay = 0) {
 export const sfx = {
   resume() { try { ac().resume(); } catch { /* noop */ } },
   toggle() { muted = !muted; return muted; },
+  setMuted(m) { muted = !!m; return muted; },
+  isMuted() { return muted; },
+  setVolume(v) { v = +v; if (v >= 0 && v <= 1) MASTER = v; },
+  get volume() { return MASTER; },
   bell() { [660, 880].forEach((f, i) => tone(f, 0.5, 'triangle', 0.16, 1, i * 0.22)); },
   click() { tone(420, 0.05, 'triangle', 0.08, 1.2); },
   paper(s = 1) { tone(950, 0.08, 'triangle', 0.07 * s, 1.5); },

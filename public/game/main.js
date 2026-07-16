@@ -4,7 +4,7 @@ import { makeFigure, bakeFigure } from './src/figure.js';
 import { generateExam, dealKnowledge, score, N_QUESTIONS, LETTERS } from './src/exam.js';
 import { makeNet, onlineAvailable, p2pAvailable, makeId } from './src/net.js';
 import { makeBots, BotBrain } from './src/bots.js';
-import { profile, COLORS, colorHex, makeCode, validCode, achievementsFor, parseAccount } from './src/profile.js';
+import { profile, COLORS, colorHex, makeCode, validCode, achievementsFor, deriveAccount } from './src/profile.js';
 import { makeSocial } from './src/social.js';
 import { sfx } from './src/audio.js';
 
@@ -258,21 +258,52 @@ let social = null;   // the always-on friends/stats layer (assigned at menu init
   $('netNote').textContent = (onlineAvailable() || p2pAvailable())
     ? 'Online rooms enabled — share the 6-letter code with friends on any device, anywhere.'
     : 'Local mode: rooms work across TABS of this browser. Solo works everywhere.';
-  $('soundBtn').onclick = () => ($('soundBtn').textContent = sfx.toggle() ? '🔇' : '🔊');
-  // settings: username + color
+  // audio starts from saved prefs
+  sfx.setVolume(profile.volume); sfx.setMuted(profile.muted);
+  $('soundBtn').onclick = () => { const m = sfx.toggle(); profile.muted = m; $('soundBtn').textContent = m ? '🔇' : '🔊'; };
+  $('soundBtn').textContent = sfx.isMuted() ? '🔇' : '🔊';
+
+  // ---- settings: account (username+password) + audio + controls -------------
+  function refreshAcct() {
+    $('acctStatus').textContent = profile.signedIn ? `✓ signed in as ${profile.username}` : 'playing as a guest — sign in to sync across devices';
+    $('setFriendCode').textContent = profile.uid;
+    $('btnSignOut').style.display = profile.signedIn ? '' : 'none';
+  }
   $('btnSettings').onclick = () => {
-    $('setName').value = profile.name;
-    const g = $('colorGrid'); g.innerHTML = '';
-    for (const c of COLORS) {
-      const d = document.createElement('div');
-      d.className = 'swatch' + (profile.color === c.id ? ' sel' : '');
-      d.style.background = c.hex;
-      d.onclick = () => { profile.color = c.id; [...g.children].forEach(x => x.classList.remove('sel')); d.classList.add('sel'); refreshWho(); };
-      g.appendChild(d);
-    }
+    $('setUser').value = profile.signedIn ? profile.username : profile.name;
+    $('setPass').value = '';
+    $('setMute').checked = sfx.isMuted();
+    $('setVol').value = Math.round(profile.volume * 100); $('setVolVal').textContent = Math.round(profile.volume * 100) + '%';
+    $('setSens').value = Math.round(profile.sensitivity * 100); $('setSensVal').textContent = profile.sensitivity.toFixed(2) + '×';
+    refreshAcct();
     show('settings', true);
   };
-  $('btnSettingsDone').onclick = () => { profile.name = $('setName').value; refreshWho(); if (social) social.publishStats(); show('settings', false); };
+  $('setVol').oninput = () => { const v = +$('setVol').value / 100; profile.volume = v; sfx.setVolume(v); $('setVolVal').textContent = $('setVol').value + '%'; };
+  $('setSens').oninput = () => { const v = +$('setSens').value / 100; profile.sensitivity = v; $('setSensVal').textContent = v.toFixed(2) + '×'; };
+  $('setMute').onchange = () => { sfx.setMuted($('setMute').checked); profile.muted = $('setMute').checked; $('soundBtn').textContent = sfx.isMuted() ? '🔇' : '🔊'; };
+  $('btnSignIn').onclick = async () => {
+    const u = $('setUser').value.trim(), p = $('setPass').value;
+    if (u.length < 2) { toast('pick a username (2+ letters)', 'red'); return; }
+    if (p.length < 4) { toast('password must be 4+ characters', 'red'); return; }
+    const acc = await deriveAccount(u, p);
+    if (!acc) { toast('could not sign in', 'red'); return; }
+    profile.signIn(u);
+    if (social && social.relink(acc.uid, acc.token)) toast('✓ signed in — syncing your account…', 'gold');
+    else { profile.setAccount && profile.setAccount(acc.uid, acc.token); }
+    $('setPass').value = '';
+    refreshAcct(); refreshWho();
+    setTimeout(refreshAcct, 2200);
+  };
+  $('btnSignOut').onclick = () => {
+    if (!confirm('Sign out and play as a guest on this device?')) return;
+    profile.signOut();
+    if (social && social.relink(makeCode(6), makeCode(10))) { /* fresh guest identity */ }
+    refreshAcct(); refreshWho();
+  };
+  $('btnSettingsDone').onclick = () => {
+    if (!profile.signedIn) profile.name = $('setUser').value.trim() || profile.name;   // let guests still set a display name
+    refreshWho(); if (social) social.publishStats(); show('settings', false);
+  };
 
   // ---- social: friends + stats ----------------------------------------------
   social = makeSocial();
@@ -284,7 +315,6 @@ let social = null;   // the always-on friends/stats layer (assigned at menu init
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function renderFriends() {
     $('myCode').textContent = social.myCode();
-    $('myAccount').textContent = social.myAccount();
     $('socialStatus').textContent = social.online ? '🟢 online — requests wait for your friends even when they’re offline'
       : '🔌 connecting to the friends server…';
     // incoming requests
@@ -327,19 +357,6 @@ let social = null;   // the always-on friends/stats layer (assigned at menu init
   $('btnFriends').onclick = () => { renderFriends(); show('friends', true); };
   $('btnFriendsClose').onclick = () => show('friends', false);
   $('myCode').onclick = () => { try { navigator.clipboard.writeText(social.myCode()); toast('📋 friend code copied'); } catch { /* no clipboard */ } };
-  $('myAccount').onclick = () => { try { navigator.clipboard.writeText(social.myAccount()); toast('📋 account code copied — keep it private'); } catch { /* no clipboard */ } };
-  $('btnLink').onclick = () => {
-    const acc = parseAccount($('linkInput').value);
-    if (!acc) { toast('that account code doesn’t look right', 'red'); return; }
-    if (acc.uid === social.myCode()) { toast('this device is already that account', 'red'); return; }
-    if (!confirm('Sign this device in as that account? Your current friends & stats on THIS device stay, and the account’s cloud friends & stats sync in.')) return;
-    if (social.relink(acc.uid, acc.token)) {
-      $('linkInput').value = '';
-      toast('🔗 linked — syncing your account…', 'gold');
-      refreshWho();
-      setTimeout(() => { renderFriends(); refreshWho(); }, 2200);
-    } else toast('could not link — check the code', 'red');
-  };
   $('btnAddFriend').onclick = () => {
     const c = $('friendCodeInput').value.trim().toUpperCase();
     if (c === social.myCode()) { toast("that's your own code", 'red'); return; }
@@ -450,15 +467,44 @@ function leaveRoom(msg) {
   show('menu', true);
   if (msg) toast(msg, 'red');
 }
+// No two players may share a colour. If mine clashes with someone who joined
+// earlier, I'm the one who moves — to the first free colour — and broadcast it.
+function resolveMyColor() {
+  if (!S.net || S.phase !== 'lobby') return;
+  const meP = S.roster.find(p => p.id === S.myId); if (!meP) return;
+  const earlier = S.roster.filter(p => p.id !== S.myId && (p.joinedAt < meP.joinedAt || (p.joinedAt === meP.joinedAt && p.id < S.myId)));
+  if (earlier.some(p => p.color === meP.color)) {
+    const free = COLORS.find(c => !S.roster.some(p => p.id !== S.myId && p.color === c.id));
+    if (free && free.id !== meP.color) { profile.color = free.id; S.net.setMe({ color: free.id }); }
+  }
+}
 function refreshLobby() {
   show('lobby', true);
+  resolveMyColor();
   $('roomCodeBig').textContent = S.code;
   $('lobbyPrivate').textContent = S.private ? '🔒 PRIVATE — only your friends can join' : '';
   const r = $('roster'); r.innerHTML = '';
   for (const p of seatable()) {
     const d = document.createElement('div');
-    d.innerHTML = `<span><span class="rosterDot" style="background:${colorHex(p.color)}"></span>${p.name}${p.bot ? ' 🤖' : ''}</span><span class="dim">${p.role}</span>`;
+    const you = p.id === S.myId ? ' <span class="dim">(you)</span>' : '';
+    d.innerHTML = `<span><span class="rosterDot" style="background:${colorHex(p.color)}"></span>${p.name}${p.bot ? ' 🤖' : ''}${you}</span><span class="dim">${p.role}</span>`;
     r.appendChild(d);
+  }
+  // colour picker: colours held by OTHER players are locked out
+  const cg = $('lobbyColors');
+  if (cg) {
+    cg.innerHTML = '';
+    const meP = S.roster.find(p => p.id === S.myId);
+    const others = new Set(S.roster.filter(p => p.id !== S.myId).map(p => p.color));
+    for (const c of COLORS) {
+      const mine = meP && meP.color === c.id, taken = others.has(c.id);
+      const d = document.createElement('div');
+      d.className = 'swatch' + (mine ? ' sel' : '') + (taken ? ' taken' : '');
+      d.style.background = c.hex;
+      d.title = taken ? 'taken' : c.id;
+      if (!taken && !mine) d.onclick = () => { profile.color = c.id; S.net.setMe({ color: c.id }); refreshLobby(); };
+      cg.appendChild(d);
+    }
   }
   const tc = seatable().filter(p => p.role === 'teacher').length, st = students().length;
   $('btnStart').disabled = !(tc === 1 && st >= 1 && S.net.isHost());
@@ -1099,9 +1145,10 @@ canvas.addEventListener('click', () => {
 document.addEventListener('pointerlockchange', () => { S.locked = document.pointerLockElement === canvas; });
 addEventListener('mousemove', e => {
   if (!S.locked) return;
-  const s = 0.0027 / zoom;   // zoomed in → slower, precise aim (scope feel)
+  const sens = profile.sensitivity || 1;
+  const s = 0.0027 * sens / zoom;   // zoomed in → slower, precise aim (scope feel)
   S.yaw -= e.movementX * s;
-  S.pitch = Math.max(-1.35, Math.min(1.35, S.pitch - e.movementY * (0.0025 / zoom)));
+  S.pitch = Math.max(-1.35, Math.min(1.35, S.pitch - e.movementY * (0.0025 * sens / zoom)));
 });
 // drag fallback when pointer lock is unavailable
 let dragXY = null;
@@ -1543,6 +1590,9 @@ window.__game = {
   achievements: () => profile.achievements(),
   account: () => profile.account,
   relink: (u, t) => social && social.relink(u, t),
+  derive: (u, p) => deriveAccount(u, p),
+  setColor: c => S.net && S.net.setMe({ color: c }),
+  myColor: () => { const p = S.roster.find(x => x.id === S.myId); return p && p.color; },
   act, accuse: id => S.net.send('accuse', { target: id }),
   answer: (q, a) => setAnswer(q, a),
   teleport: (x, z) => { S.me.x = x; S.me.z = z; },

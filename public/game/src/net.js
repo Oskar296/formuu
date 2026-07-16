@@ -33,12 +33,16 @@ class BaseNet {
   }
   loopback(type, data, from = this.id) { const ev = { type, data, from, t: Date.now() }; this.emit(ev); return ev; }
   sendAs(fromId, type, data) { return this.loopback(type, data, fromId); }
+  // Update my own presence fields (e.g. color) and re-broadcast so the roster
+  // everyone sees reflects the change. Overridden per adapter.
+  setMe(_patch) {}
 }
 
 export class LocalNet extends BaseNet {
   async join(_code, me) { this.roster = [{ ...me, id: this.id, joinedAt: Date.now() }]; this.emitRoster(); }
   addBots(bots) { this.roster.push(...bots); this.emitRoster(); }
   send(type, data) { this.loopback(type, data); }
+  setMe(patch) { const m = this.roster.find(p => p.id === this.id); if (m) { Object.assign(m, patch); this.emitRoster(); } }
   leave() {}
 }
 
@@ -49,9 +53,11 @@ export class BCNet extends BaseNet {
     this.peers = new Map([[this.id, { ...this.me, seen: Infinity }]]);
     this.ch.onmessage = ({ data: m }) => {
       if (m.k === 'ping') {
-        const known = this.peers.has(m.who.id);
+        const prev = this.peers.get(m.who.id);
         this.peers.set(m.who.id, { ...m.who, seen: Date.now() });
-        if (!known) { this.refresh(); this.ping(); }
+        if (!prev) this.ping();   // greet the newcomer so it learns of us
+        // refresh when a peer is new OR changed a presence field (e.g. colour)
+        if (!prev || prev.color !== m.who.color || prev.name !== m.who.name || prev.role !== m.who.role) this.refresh();
       } else if (m.k === 'bye') { this.peers.delete(m.who); this.refresh(); }
       else this.emit(m.ev);
     };
@@ -68,6 +74,7 @@ export class BCNet extends BaseNet {
   ping() { this.ch.postMessage({ k: 'ping', who: this.me }); }
   refresh() { this.roster = [...this.peers.values()].map(({ seen, ...p }) => p); this.emitRoster(); }
   send(type, data) { const ev = this.loopback(type, data); this.ch.postMessage({ k: 'ev', ev }); }
+  setMe(patch) { Object.assign(this.me, patch); this.peers.set(this.id, { ...this.me, seen: Infinity }); this.ping(); this.refresh(); }
   leave() { clearInterval(this.pinger); try { this.ch.postMessage({ k: 'bye', who: this.id }); this.ch.close(); } catch { /* closing */ } }
 }
 
@@ -90,6 +97,7 @@ export class SupabaseNet extends BaseNet {
     });
   }
   send(type, data) { const ev = this.loopback(type, data); this.chan.send({ type: 'broadcast', event: 'e', payload: ev }); }
+  setMe(patch) { Object.assign(this.me, patch); try { this.chan.track(this.me); } catch { /* not ready */ } }
   leave() { try { this.chan.unsubscribe(); } catch { /* leaving */ } }
 }
 
@@ -133,9 +141,10 @@ export class MQTTNet extends BaseNet {
       else if (t === this.presTopic) {
         if (m.who && m.who.id === this.id) return;                        // ignore our own presence
         if (m.k === 'ping') {
-          const known = this.peers.has(m.who.id);
+          const prev = this.peers.get(m.who.id);
           this.peers.set(m.who.id, { ...m.who, seen: Date.now() });
-          if (!known) { this.refresh(); this.ping(); }                    // greet a newcomer so it learns of us fast
+          if (!prev) this.ping();                                         // greet a newcomer so it learns of us fast
+          if (!prev || prev.color !== m.who.color || prev.name !== m.who.name || prev.role !== m.who.role) this.refresh();
         } else if (m.k === 'bye') { this.peers.delete(m.who); this.refresh(); }
       }
     });
@@ -153,6 +162,7 @@ export class MQTTNet extends BaseNet {
   refresh() { this.roster = [...this.peers.values()].map(({ seen, ...p }) => p); this.emitRoster(); }
   pub(topic, obj) { try { this.client.publish(topic, JSON.stringify(obj), { qos: 0 }); } catch { /* not connected */ } }
   send(type, data) { const ev = this.loopback(type, data); this.pub(this.evTopic, ev); }
+  setMe(patch) { Object.assign(this.me, patch); this.peers.set(this.id, { ...this.me, seen: Infinity }); this.ping(); this.refresh(); }
   leave() {
     clearInterval(this.pinger);
     try { this.pub(this.presTopic, { k: 'bye', who: this.id }); this.client.end(true); } catch { /* leaving */ }

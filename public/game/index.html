@@ -60,13 +60,18 @@
   .note { font-size: 11.5px; opacity: .55; margin-top: 12px; line-height: 1.5; }
 
   /* settings */
-  #settings .card { width: min(400px, 92vw); }
-  #setName { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #4a5270; background: #171b26;
-    color: #f0ede4; font-size: 16px; text-align: center; margin-bottom: 16px; }
-  #colorGrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 16px; }
-  .swatch { aspect-ratio: 1; border-radius: 50%; border: 3px solid transparent; cursor: pointer; transition: .12s; }
+  #settings .card { width: min(420px, 92vw); max-height: 92vh; overflow-y: auto; }
+  #setName, .setInput { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #4a5270; background: #171b26;
+    color: #f0ede4; font-size: 15px; margin-bottom: 8px; }
+  .setInput::placeholder { color: #7a8299; }
+  #settings input[type=range], #lobby input[type=range] { accent-color: #e0b64e; }
+  #settings .row2 button:not(.bigBtn) { padding: 0 14px; border-radius: 10px; border: 1px solid #4a5270; background: #2c3247; color: #cdd3e2; font-size: 13px; }
+  #colorGrid, #lobbyColors { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 8px; }
+  .swatch { aspect-ratio: 1; border-radius: 50%; border: 3px solid transparent; cursor: pointer; transition: .12s; position: relative; }
   .swatch:hover { transform: scale(1.12); }
   .swatch.sel { border-color: #fff; box-shadow: 0 0 12px rgba(255,255,255,.5); }
+  .swatch.taken { cursor: not-allowed; opacity: .28; filter: grayscale(.5); }
+  .swatch.taken:hover { transform: none; }
   .setLbl { font-size: 11px; letter-spacing: 2px; opacity: .6; text-align: left; margin-bottom: 8px; }
 
   /* lobby */
@@ -278,14 +283,28 @@
 
 <!-- SETTINGS -->
 <div class="ov hidden" id="settings">
-  <div class="card">
-    <div class="setLbl">USERNAME</div>
-    <input type="text" id="setName" maxlength="14" placeholder="your name">
-    <div class="setLbl">YOUR COLOR</div>
-    <div id="colorGrid"></div>
-    <div class="setLbl">🔍 hold <b style="color:#ffd76a">Z</b> to zoom in · <b style="color:#ffd76a">X</b> to zoom out</div>
-    <div style="font-size:11px;opacity:.5;margin-bottom:16px">the resting field of view is fixed for fair play</div>
-    <button class="bigBtn" id="btnSettingsDone">DONE</button>
+  <div class="card" style="text-align:left">
+    <div style="font-weight:900;font-size:18px;text-align:center;margin-bottom:12px">⚙️ SETTINGS</div>
+
+    <div class="setLbl">👤 ACCOUNT</div>
+    <div class="note" id="acctStatus" style="margin:-3px 0 7px"></div>
+    <input type="text" id="setUser" class="setInput" maxlength="14" placeholder="username" autocomplete="username">
+    <input type="password" id="setPass" class="setInput" maxlength="40" placeholder="password" autocomplete="current-password">
+    <div class="row2" style="margin-top:4px">
+      <button class="bigBtn" id="btnSignIn" style="margin:0;flex:1">SIGN IN / CREATE</button>
+      <button id="btnSignOut" title="switch to a guest account">Sign out</button>
+    </div>
+    <div class="note" style="margin-top:7px;line-height:1.5">Use the same username &amp; password on another device to sync your friends &amp; stats. Your friend code: <b id="setFriendCode" style="color:#e0b64e">–</b></div>
+
+    <div class="setLbl" style="margin-top:18px">🔊 AUDIO</div>
+    <label style="display:flex;align-items:center;gap:9px;font-size:14px;margin-bottom:9px"><input type="checkbox" id="setMute" style="width:15px;height:15px"> Mute all sound</label>
+    <div style="display:flex;align-items:center;gap:10px;font-size:13px"><span style="width:56px">Volume</span><input type="range" id="setVol" min="0" max="100" style="flex:1"><span id="setVolVal" style="width:38px;text-align:right;color:#e0b64e"></span></div>
+
+    <div class="setLbl" style="margin-top:18px">🎮 CONTROLS</div>
+    <div style="display:flex;align-items:center;gap:10px;font-size:13px"><span style="width:56px">Sensitivity</span><input type="range" id="setSens" min="20" max="300" style="flex:1"><span id="setSensVal" style="width:38px;text-align:right;color:#e0b64e"></span></div>
+    <div class="note" style="margin-top:9px">🔍 hold <b style="color:#ffd76a">Z</b> to zoom in · <b style="color:#ffd76a">X</b> to zoom out · resting field of view is fixed for fair play</div>
+
+    <button class="bigBtn" id="btnSettingsDone" style="margin-top:18px">DONE</button>
   </div>
 </div>
 
@@ -296,6 +315,8 @@
     <div id="roomCodeBig">----</div>
     <div class="note" id="lobbyPrivate" style="color:#e0b64e;font-weight:700;min-height:16px"></div>
     <div id="roster"></div>
+    <div class="setLbl" style="margin-top:6px;text-align:center">🎨 PICK YOUR COLOR</div>
+    <div id="lobbyColors"></div>
     <button class="bigBtn" id="btnStart" disabled>START THE EXAM</button>
     <div id="lobbyHint"></div>
   </div>
@@ -316,14 +337,7 @@
     <div id="reqSection"></div>
     <div class="setLbl" style="margin-top:12px">YOUR FRIENDS</div>
     <div id="friendList"></div>
-    <div class="setLbl" style="margin-top:14px">🔗 PLAY ON ANOTHER DEVICE</div>
-    <div class="note" style="text-align:left;margin:-2px 0 3px">Your account code — keep it private, it signs you in as you:</div>
-    <div id="myAccount" title="click to copy" style="font-size:14px;font-weight:800;letter-spacing:2px;color:#9fd0ff;text-align:center;cursor:pointer;word-break:break-all;background:#171b26;border-radius:8px;padding:8px">—</div>
-    <div class="note" style="text-align:left;margin:6px 0 3px">On your other device, paste it below to sign in — your friends &amp; stats come with you:</div>
-    <div class="row2">
-      <input type="text" id="linkInput" maxlength="18" placeholder="ACCOUNT CODE">
-      <button id="btnLink">LINK</button>
-    </div>
+    <div class="note" style="text-align:left;margin-top:12px">🔗 Playing on another device? Sign in with the same username &amp; password in <b>⚙️ Settings</b> and your friends &amp; stats come with you.</div>
     <button class="bigBtn" id="btnFriendsClose" style="margin-top:14px">DONE</button>
   </div>
 </div>
