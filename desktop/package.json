@@ -1,0 +1,51 @@
+{
+  "name": "the-exam",
+  "productName": "THE EXAM",
+  "version": "0.1.0",
+  "description": "THE EXAM — cheat together, don't get caught. A 3D multiplayer classroom cheating game.",
+  "author": "Oskar296",
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "prestart": "node copy-game.js",
+    "start": "electron .",
+    "predist": "node copy-game.js",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "io.github.oskar296.theexam",
+    "productName": "THE EXAM",
+    "files": [
+      "main.js",
+      "server.js",
+      "game/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.games"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Game"
+    }
+  }
+}

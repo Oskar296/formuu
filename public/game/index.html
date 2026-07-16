@@ -10,6 +10,11 @@
   html, body { width: 100%; height: 100%; overflow: hidden; background: #14161f; }
   body { font-family: 'Segoe UI', system-ui, sans-serif; color: #f0ede4; user-select: none; -webkit-user-select: none; }
   #c { position: fixed; inset: 0; display: block; }
+  /* permanent cinematic vignette + a faint warm/cool grade over the 3D view */
+  #vignette { position: fixed; inset: 0; z-index: 10; pointer-events: none;
+    background:
+      radial-gradient(ellipse 120% 92% at 50% 44%, transparent 48%, rgba(6,8,16,.42) 100%),
+      linear-gradient(180deg, rgba(255,244,224,.06), rgba(10,14,30,.12)); }
   button { font-family: inherit; cursor: pointer; }
   .hidden { display: none !important; }
   .dim { opacity: .55; }
@@ -21,10 +26,14 @@
     backdrop-filter: blur(2.5px); }
   #menuRight { display: flex; flex-direction: column; align-items: center; }
   h1.logo { font-size: clamp(34px, 6vw, 58px); font-weight: 900; letter-spacing: 3px;
-    text-shadow: 0 3px 0 #8a2f2f, 0 7px 24px rgba(0,0,0,.6); }
-  .tag { letter-spacing: 4px; font-size: 12.5px; opacity: .65; margin-top: 6px; }
-  .card { margin-top: 22px; background: #232837ee; border: 1px solid #3a4156; border-radius: 16px;
-    padding: 20px 24px; width: min(420px, 92vw); }
+    background: linear-gradient(180deg, #fff 30%, #f0d9a8 100%); -webkit-background-clip: text;
+    background-clip: text; color: transparent;
+    filter: drop-shadow(0 3px 0 #8a2f2f) drop-shadow(0 8px 22px rgba(0,0,0,.6)); }
+  .tag { letter-spacing: 4px; font-size: 12.5px; opacity: .6; margin-top: 8px; }
+  .card { margin-top: 22px; background: linear-gradient(180deg, #262c3ef2, #1c2130f2);
+    border: 1px solid #3a4156; border-top-color: #55607e; border-radius: 18px;
+    padding: 22px 24px; width: min(420px, 92vw);
+    box-shadow: 0 20px 60px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05); }
   #whoRow { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 14px; }
   #whoDot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff3; }
   #whoName { font-size: 17px; font-weight: 700; }
@@ -35,9 +44,15 @@
     background: #171b26; color: #cfd3e0; font-size: 14.5px; }
   .roleRow button.sel { background: #3a4a7a; border-color: #7a8ac9; color: #fff; }
   .bigBtn { width: 100%; padding: 13px; font-size: 16px; font-weight: 800; letter-spacing: 1px;
-    border: none; border-radius: 10px; background: linear-gradient(120deg, #e0b64e, #d68a3f); color: #241a08; }
-  .bigBtn.green { background: linear-gradient(120deg, #8fd39e, #5aa86b); color: #12210f; margin-bottom: 10px; }
-  .bigBtn:disabled { filter: grayscale(.8); opacity: .5; cursor: default; }
+    border: none; border-radius: 11px; background: linear-gradient(120deg, #eec25a, #d68a3f); color: #241a08;
+    box-shadow: 0 4px 14px rgba(224,182,78,.28), inset 0 1px 0 rgba(255,255,255,.35);
+    transition: transform .1s, box-shadow .15s; }
+  .bigBtn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 7px 20px rgba(224,182,78,.4), inset 0 1px 0 rgba(255,255,255,.4); }
+  .bigBtn:active:not(:disabled) { transform: translateY(1px); }
+  .bigBtn.green { background: linear-gradient(120deg, #9adca9, #5aa86b); color: #12210f; margin-bottom: 10px;
+    box-shadow: 0 4px 14px rgba(122,200,140,.28), inset 0 1px 0 rgba(255,255,255,.35); }
+  .bigBtn.green:hover:not(:disabled) { box-shadow: 0 7px 20px rgba(122,200,140,.42), inset 0 1px 0 rgba(255,255,255,.4); }
+  .bigBtn:disabled { filter: grayscale(.8); opacity: .5; cursor: default; box-shadow: none; }
   .row2 { display: flex; gap: 10px; margin-top: 10px; }
   .row2 input { flex: 1; padding: 11px; border-radius: 10px; border: 1px solid #4a5270; background: #171b26;
     color: #f0ede4; font-size: 15px; text-align: center; text-transform: uppercase; }
@@ -45,13 +60,18 @@
   .note { font-size: 11.5px; opacity: .55; margin-top: 12px; line-height: 1.5; }
 
   /* settings */
-  #settings .card { width: min(400px, 92vw); }
-  #setName { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #4a5270; background: #171b26;
-    color: #f0ede4; font-size: 16px; text-align: center; margin-bottom: 16px; }
-  #colorGrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 16px; }
-  .swatch { aspect-ratio: 1; border-radius: 50%; border: 3px solid transparent; cursor: pointer; transition: .12s; }
+  #settings .card { width: min(420px, 92vw); max-height: 92vh; overflow-y: auto; }
+  #setName, .setInput { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #4a5270; background: #171b26;
+    color: #f0ede4; font-size: 15px; margin-bottom: 8px; }
+  .setInput::placeholder { color: #7a8299; }
+  #settings input[type=range], #lobby input[type=range] { accent-color: #e0b64e; }
+  #settings .row2 button:not(.bigBtn) { padding: 0 14px; border-radius: 10px; border: 1px solid #4a5270; background: #2c3247; color: #cdd3e2; font-size: 13px; }
+  #colorGrid, #lobbyColors { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 8px; }
+  .swatch { aspect-ratio: 1; border-radius: 50%; border: 3px solid transparent; cursor: pointer; transition: .12s; position: relative; }
   .swatch:hover { transform: scale(1.12); }
   .swatch.sel { border-color: #fff; box-shadow: 0 0 12px rgba(255,255,255,.5); }
+  .swatch.taken { cursor: not-allowed; opacity: .28; filter: grayscale(.5); }
+  .swatch.taken:hover { transform: none; }
   .setLbl { font-size: 11px; letter-spacing: 2px; opacity: .6; text-align: left; margin-bottom: 8px; }
 
   /* lobby */
@@ -61,6 +81,21 @@
     display: flex; justify-content: space-between; align-items: center; }
   .rosterDot { display: inline-block; width: 13px; height: 13px; border-radius: 50%; margin-right: 8px; }
   #lobbyHint { font-size: 12.5px; opacity: .65; margin-top: 4px; }
+
+  /* friends + stats panels */
+  .friendRow { background: #171b26; border-radius: 8px; padding: 7px 11px; font-size: 14px;
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .friendRow button { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #4a5270;
+    background: #2c3247; color: #f0ede4; font-size: 14px; cursor: pointer; padding: 0; }
+  .friendRow button:hover { background: #3a4263; }
+  #friendList, #reqSection { width: 100%; }
+  .statTile { background: #171b26; border-radius: 10px; padding: 10px; text-align: center; }
+  .statVal { font-size: 22px; font-weight: 900; color: #e0b64e; }
+  .statKey { font-size: 11px; opacity: .6; letter-spacing: .5px; margin-top: 2px; }
+  .achRow { display: flex; gap: 10px; align-items: center; background: #171b26; border-radius: 9px;
+    padding: 8px 11px; font-size: 13px; opacity: .5; filter: grayscale(.7); }
+  .achRow.on { opacity: 1; filter: none; box-shadow: inset 0 0 0 1px rgba(224,182,78,.4); }
+  .achIcon { font-size: 22px; }
 
   /* results */
   #resultsRows { margin: 14px 0; display: flex; flex-direction: column; gap: 5px; width: min(420px, 90vw); }
@@ -73,7 +108,6 @@
   .hud { position: fixed; z-index: 20; pointer-events: none; }
   #topbar { top: 12px; left: 50%; transform: translateX(-50%); text-align: center;
     background: rgba(14,16,24,.62); border-radius: 12px; padding: 5px 20px; backdrop-filter: blur(4px); }
-  #phaseLabel { font-size: 9.5px; letter-spacing: 3px; opacity: .65; }
   #phaseTimer { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
   #phaseTimer.urgent { color: #ff8a7a; animation: urg .8s ease-in-out infinite; }
   @keyframes urg { 50% { opacity: .55; } }
@@ -156,8 +190,15 @@
     max-width: 92vw; }
   #viewerTitle { font-size: 14.5px; margin-bottom: 10px; max-width: 460px; line-height: 1.4; }
   #viewerImg { background: #f6f1e0; border-radius: 8px; max-width: min(440px, 88vw); }
-  #viewerClose { margin-top: 12px; padding: 9px 26px; border-radius: 9px; border: none;
+  #viewerClose, #viewerCopy { margin-top: 12px; padding: 9px 22px; border-radius: 9px; border: none;
     background: linear-gradient(120deg, #e0b64e, #d68a3f); color: #241a08; font-weight: 800; }
+  #viewerCopy { background: linear-gradient(120deg, #8fd39e, #5aa86b); color: #12210f; margin-right: 8px; }
+  #scribStampHint { font-size: 10.5px; opacity: .55; margin-top: 8px; }
+  #scribStamps { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin-top: 5px; }
+  .stamp { font-size: 11px; padding: 5px 0; border-radius: 7px; border: 1px solid #4a5270;
+    background: #171b26; color: #cfd3e0; cursor: pointer; text-align: center; font-weight: 700; line-height: 1.2; }
+  .stamp .qn { font-size: 8.5px; opacity: .6; display: block; }
+  .stamp.set { background: #3a6a4a; border-color: #6ac98a; color: #eafff0; }
 
   #soundBtn { position: fixed; top: 12px; right: 12px; z-index: 45; background: rgba(23,27,38,.9);
     border: 1px solid #3a4156; border-radius: 10px; padding: 6px 10px; font-size: 15px; color: #fff; }
@@ -173,6 +214,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="vignette"></div>
 <div id="riotVignette"></div>
 
 <!-- MENU -->
@@ -193,10 +235,10 @@
       <div class="roleRow" id="mapRow" style="margin-top:-2px">
         <button data-map="random" class="sel" title="Random map">🎲</button>
         <button data-map="classroom" title="Classroom">🏫</button>
-        <button data-map="lab" title="Science Lab — exclusive: smoke vial">🧪</button>
-        <button data-map="gym" title="Gym Hall — exclusive: hall pass">🏀</button>
-        <button data-map="library" title="Library — exclusive: encyclopedia">📚</button>
-        <button data-map="detention" title="Night Detention — exclusive: cockroach">🌙</button>
+        <button data-map="lab" title="Science Lab">🧪</button>
+        <button data-map="gym" title="Gym Hall">🏀</button>
+        <button data-map="library" title="Library">📚</button>
+        <button data-map="detention" title="Night Detention">🌙</button>
       </div>
       <div class="note" id="mapNote" style="margin:-4px 0 10px">🎲 random map each round</div>
       <div class="roleRow" id="diffRow" style="margin-top:-2px">
@@ -207,11 +249,18 @@
       <div class="note" id="diffNote" style="margin:-4px 0 10px">🧑‍🏫 normal teacher</div>
       <button class="bigBtn green" id="btnSolo">🤖 PLAY SOLO — vs bots</button>
       <button class="bigBtn" id="btnCreate">CREATE CLASSROOM</button>
+      <label id="privToggle" style="display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer;font-size:12.5px;opacity:.85;margin:5px 0">
+        <input type="checkbox" id="privChk" style="width:15px;height:15px"> 🔒 Private — only my friends can join
+      </label>
       <div class="row2">
-        <input type="text" id="codeInput" maxlength="4" placeholder="CODE">
+        <input type="text" id="codeInput" maxlength="6" placeholder="6-LETTER CODE">
         <button id="btnJoin">JOIN</button>
       </div>
       <div class="note" id="netNote"></div>
+      <div class="socialRow" style="display:flex;gap:8px;margin-top:8px">
+        <button class="bigBtn" id="btnFriends" style="flex:1;margin:0">👥 Friends</button>
+        <button class="bigBtn" id="btnStats" style="flex:1;margin:0">📊 Stats</button>
+      </div>
       <div class="note" id="statLine" style="margin-top:6px"></div>
     </div>
   </div>
@@ -224,8 +273,8 @@
     <div>🎓 Every student secretly knows only <b>2 of the 8 answers</b>. The class passes only if the <b>average is 60%+</b> — so you MUST share answers… by cheating.</div>
     <div>🤫 Peek at papers, throw drawn notes, flash your sheet, ink your arm, rig your bottle, tap &amp; cough in code, sneak out of your seat (SPACE)…</div>
     <div>🚨 Cheat while the teacher is watching = <b>strike</b>. Three strikes = expelled to the stool of shame.</div>
-    <div>🛠 Before the exam, rig the room: marbles, glue, pepper eraser, alarm clock.</div>
-    <div>✨ Rare glowing items appear during the exam — leave your seat to grab them. Some are map-exclusive!</div>
+    <div>🧠 In <b>PREP</b>, plan ahead: hide notes UNDER desks (the teacher can't take those), plant a decoy on the teacher's desk, ink your arm, and rig the <b>clock / door / chair / floor</b> to trigger a "cheat window".</div>
+    <div>🎯 When a rigged distraction fires, nobody's watching — that's your moment to cheat freely.</div>
     <div>🧑‍🏫 As the Teacher: catch cheats within 5 seconds, answer the phone, write on the board — and don't accuse the innocent.</div>
     <button class="bigBtn" id="btnHowClose" style="margin-top:10px">GOT IT</button>
   </div>
@@ -233,14 +282,28 @@
 
 <!-- SETTINGS -->
 <div class="ov hidden" id="settings">
-  <div class="card">
-    <div class="setLbl">USERNAME</div>
-    <input type="text" id="setName" maxlength="14" placeholder="your name">
-    <div class="setLbl">YOUR COLOR</div>
-    <div id="colorGrid"></div>
-    <div class="setLbl">FIELD OF VIEW — <span id="fovVal">103</span>°</div>
-    <input type="range" id="setFov" min="70" max="130" step="1" style="width:100%;margin-bottom:16px">
-    <button class="bigBtn" id="btnSettingsDone">DONE</button>
+  <div class="card" style="text-align:left">
+    <div style="font-weight:900;font-size:18px;text-align:center;margin-bottom:12px">⚙️ SETTINGS</div>
+
+    <div class="setLbl">👤 ACCOUNT</div>
+    <div class="note" id="acctStatus" style="margin:-3px 0 7px"></div>
+    <input type="text" id="setUser" class="setInput" maxlength="14" placeholder="username" autocomplete="username">
+    <input type="password" id="setPass" class="setInput" maxlength="40" placeholder="password" autocomplete="current-password">
+    <div class="row2" style="margin-top:4px">
+      <button class="bigBtn" id="btnSignIn" style="margin:0;flex:1">SIGN IN / CREATE</button>
+      <button id="btnSignOut" title="switch to a guest account">Sign out</button>
+    </div>
+    <div class="note" style="margin-top:7px;line-height:1.5">Use the same username &amp; password on another device to sync your friends &amp; stats. Your friend code: <b id="setFriendCode" style="color:#e0b64e">–</b></div>
+
+    <div class="setLbl" style="margin-top:18px">🔊 AUDIO</div>
+    <label style="display:flex;align-items:center;gap:9px;font-size:14px;margin-bottom:9px"><input type="checkbox" id="setMute" style="width:15px;height:15px"> Mute all sound</label>
+    <div style="display:flex;align-items:center;gap:10px;font-size:13px"><span style="width:56px">Volume</span><input type="range" id="setVol" min="0" max="100" style="flex:1"><span id="setVolVal" style="width:38px;text-align:right;color:#e0b64e"></span></div>
+
+    <div class="setLbl" style="margin-top:18px">🎮 CONTROLS</div>
+    <div style="display:flex;align-items:center;gap:10px;font-size:13px"><span style="width:56px">Sensitivity</span><input type="range" id="setSens" min="20" max="300" style="flex:1"><span id="setSensVal" style="width:38px;text-align:right;color:#e0b64e"></span></div>
+    <div class="note" style="margin-top:9px">🔍 hold <b style="color:#ffd76a">Z</b> to zoom in · <b style="color:#ffd76a">X</b> to zoom out · resting field of view is fixed for fair play</div>
+
+    <button class="bigBtn" id="btnSettingsDone" style="margin-top:18px">DONE</button>
   </div>
 </div>
 
@@ -249,9 +312,43 @@
   <div class="card" style="text-align:center">
     <div class="dim" style="letter-spacing:3px;font-size:11px">CLASSROOM CODE</div>
     <div id="roomCodeBig">----</div>
+    <div class="note" id="lobbyPrivate" style="color:#e0b64e;font-weight:700;min-height:16px"></div>
     <div id="roster"></div>
+    <div class="setLbl" style="margin-top:6px;text-align:center">🎨 PICK YOUR COLOR</div>
+    <div id="lobbyColors"></div>
     <button class="bigBtn" id="btnStart" disabled>START THE EXAM</button>
     <div id="lobbyHint"></div>
+  </div>
+</div>
+
+<!-- FRIENDS -->
+<div class="ov hidden" id="friends">
+  <div class="card" style="text-align:left">
+    <div style="font-weight:900;font-size:17px;text-align:center;margin-bottom:6px">👥 FRIENDS</div>
+    <div class="setLbl">YOUR FRIEND CODE — share it so friends can add you</div>
+    <div id="myCode" title="click to copy" style="font-size:28px;font-weight:900;letter-spacing:7px;color:#e0b64e;text-align:center;cursor:pointer">------</div>
+    <div class="note" id="socialStatus" style="text-align:center;margin:2px 0 12px"></div>
+    <div class="setLbl">ADD A FRIEND BY CODE</div>
+    <div class="row2">
+      <input type="text" id="friendCodeInput" maxlength="6" placeholder="THEIR CODE">
+      <button id="btnAddFriend">ADD</button>
+    </div>
+    <div id="reqSection"></div>
+    <div class="setLbl" style="margin-top:12px">YOUR FRIENDS</div>
+    <div id="friendList"></div>
+    <div class="note" style="text-align:left;margin-top:12px">🔗 Playing on another device? Sign in with the same username &amp; password in <b>⚙️ Settings</b> and your friends &amp; stats come with you.</div>
+    <button class="bigBtn" id="btnFriendsClose" style="margin-top:14px">DONE</button>
+  </div>
+</div>
+
+<!-- STATS / ACHIEVEMENTS -->
+<div class="ov hidden" id="statsPanel">
+  <div class="card" style="text-align:left">
+    <div id="statsTitle" style="font-weight:900;font-size:17px;text-align:center;margin-bottom:10px">📊 YOUR STATS</div>
+    <div id="statsGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+    <div class="setLbl" style="margin-top:14px">🏅 ACHIEVEMENTS</div>
+    <div id="achGrid" style="display:grid;grid-template-columns:1fr;gap:6px;max-height:34vh;overflow:auto"></div>
+    <button class="bigBtn" id="btnStatsClose" style="margin-top:14px">DONE</button>
   </div>
 </div>
 
@@ -264,7 +361,7 @@
 </div>
 
 <!-- HUD -->
-<div class="hud" id="topbar"><div id="phaseLabel">—</div><div id="phaseTimer">–:––</div></div>
+<div class="hud" id="topbar"><div id="phaseTimer">–:––</div></div>
 <div class="hud hidden" id="crosshair"></div>
 <div class="hud hidden" id="prompt"></div>
 <div class="hud" id="banner"></div>
@@ -285,13 +382,6 @@
   <div id="dutyLine"></div>
 </div>
 
-<div class="hud hidden" id="hotbar">
-  <div class="slot" data-i="0"><span class="k">1</span>🔮<span class="nm">marbles</span></div>
-  <div class="slot" data-i="1"><span class="k">2</span>🍯<span class="nm">glue</span></div>
-  <div class="slot" data-i="2"><span class="k">3</span>🌶<span class="nm">pepper</span></div>
-  <div class="slot" data-i="3"><span class="k">4</span>⏰<span class="nm">clock</span></div>
-  <div class="slot" data-i="4"><span class="k">5</span>📝<span class="nm">note</span></div>
-</div>
 
 <!-- HELP -->
 <div id="help" class="hidden">
@@ -299,14 +389,14 @@
     <div style="font-weight:900;font-size:17px;margin-bottom:6px">CONTROLS</div>
     <div><b>mouse</b> look around (click once to grab)</div>
     <div><b>WASD</b> walk (prep / teacher / out of seat) &nbsp;·&nbsp; <b>SHIFT</b> sprint</div>
-    <div><b>E / click</b> use what you're looking at</div>
-    <div><b>SPACE</b> leave / retake your seat mid-exam (risky!)</div>
-    <div><b>N</b> draw a note, then click a classmate to throw</div>
-    <div><b>1–4</b> hold up finger signals</div>
-    <div><b>F</b> flash your sheet &nbsp;·&nbsp; <b>T</b> tap &nbsp;·&nbsp; <b>C</b> cough</div>
-    <div><b>V</b> your arm ink &nbsp;·&nbsp; <b>R</b> raise hand</div>
+    <div><b>Z</b> hold to zoom in &nbsp;·&nbsp; <b>X</b> hold to zoom out (wider view)</div>
+    <div><b>E / click</b> use / draw on what you're looking at</div>
+    <div><b>M</b> toggle third-person &nbsp;·&nbsp; <b>SPACE</b> leave / retake your seat</div>
     <div><b>TAB</b> show/hide your exam paper</div>
-    <div style="opacity:.75;font-size:12.5px">✨ rare items (🪞 📜 💨) appear when the exam starts — walk over and grab them</div>
+    <div style="margin-top:6px;color:#ffd76a;font-weight:700">🧠 PREP — plan your cheating:</div>
+    <div style="font-size:12.5px;line-height:1.7">Aim at any <b>desk</b> to hide a note UNDER it (the teacher can't take it — whoever sits there reads it in the exam). Plant a <b>decoy</b> on the teacher's desk. Look down to <b>ink your arm</b>, aim at your <b>bottle</b> to label it, walk to the <b>board</b> to write big. Aim at the glowing <b>clock / door / chair / floor</b> to rig a distraction that opens a cheat window.</div>
+    <div style="margin-top:4px;color:#ffd76a;font-weight:700">✍️ EXAM — everything is freeform, you draw it:</div>
+    <div style="font-size:12.5px;line-height:1.7">Aim at a <b>classmate</b> to pass a note, at your desk to read what you hid, <b>peek</b> a neighbour's paper. Draw anything and stamp the answers to share — the reader taps <b>Copy</b>. Wrong stamps = decoys.</div>
     <div style="opacity:.6;font-size:12px;margin-top:6px">press H to close</div>
   </div>
 </div>
@@ -314,8 +404,10 @@
 <!-- SCRIBBLER -->
 <div id="scrib" class="hidden">
   <div id="scribCard">
-    <div style="font-size:14px;margin-bottom:8px" id="scribTitle">✍️ Draw your note — anything goes</div>
+    <div style="font-size:14px;margin-bottom:8px" id="scribTitle">✍️ Draw anything — this is YOUR cheat</div>
     <canvas id="scribCanvas" width="360" height="240"></canvas>
+    <div id="scribStampHint">tap a question to stamp an answer you want to share (tap again to change)</div>
+    <div id="scribStamps"></div>
     <div id="scribRow">
       <button id="scribClear">Clear</button>
       <button id="scribCancel">Cancel</button>
@@ -329,13 +421,15 @@
   <div id="viewerCard">
     <div id="viewerTitle"></div>
     <img id="viewerImg" alt="note">
-    <br><button id="viewerClose">OK</button>
+    <br><button id="viewerCopy" class="hidden">📋 Copy answers</button>
+    <button id="viewerClose">OK</button>
   </div>
 </div>
 
 <button id="soundBtn">🔊</button>
 
 <script src="./vendor/supabase.umd.js"></script>
+<script src="./vendor/mqtt.min.js"></script>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
 <script type="module" src="./main.js"></script>
 </body>

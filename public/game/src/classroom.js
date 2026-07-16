@@ -7,11 +7,11 @@ import * as THREE from 'three';
 // reads fresh coordinates.
 
 export const MAPS = {
-  classroom: { name: 'Classroom', icon: '🏫', items: ['mirror', 'scrap', 'cushion'] },
-  lab: { name: 'Science Lab', icon: '🧪', items: ['smoke', 'scrap', 'mirror'] },
-  gym: { name: 'Gym Hall', icon: '🏀', items: ['pass', 'cushion', 'scrap'] },
-  library: { name: 'Library', icon: '📚', items: ['book', 'mirror', 'scrap'] },
-  detention: { name: 'Night Detention', icon: '🌙', items: ['roach', 'smoke', 'scrap'] },
+  classroom: { name: 'Classroom', icon: '🏫' },
+  lab: { name: 'Science Lab', icon: '🧪' },
+  gym: { name: 'Gym Hall', icon: '🏀' },
+  library: { name: 'Library', icon: '📚' },
+  detention: { name: 'Night Detention', icon: '🌙' },
 };
 
 export const DESKS = [];                       // seat positions (chair center), facing -z
@@ -59,11 +59,15 @@ function layout(mapId) {
 
 const mat = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, ...o });
 
+let ANISO = 8;   // set from the renderer's real max in main.js via setAniso()
+export function setAniso(n) { ANISO = Math.max(1, n | 0); }
 function tex(w, h, draw, repeat) {
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
   draw(cv.getContext('2d'), w, h);
   const t = new THREE.CanvasTexture(cv);
   t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = ANISO;   // sharp at grazing angles (floors, walls, wood)
+  t.generateMipmaps = true;
   if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repeat[0], repeat[1]); }
   return t;
 }
@@ -135,7 +139,7 @@ const hex2rgb = h => { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >
 // top-down gradient so big walls catch light unevenly instead of reading flat
 const paintTex = (hex) => {
   const [r, g, bl] = hex2rgb(hex);
-  return tex(256, 256, (c, w, h) => {
+  return tex(384, 384, (c, w, h) => {
     const grad = c.createLinearGradient(0, 0, 0, h);
     grad.addColorStop(0, `rgb(${clamp(r + 10)},${clamp(g + 10)},${clamp(bl + 10)})`);
     grad.addColorStop(1, `rgb(${clamp(r - 12)},${clamp(g - 12)},${clamp(bl - 12)})`);
@@ -156,7 +160,7 @@ const paintTex = (hex) => {
 // wood grain for desktops: flowing streaks + the odd knot
 const woodGrainTex = (base) => {
   const [r, g, bl] = hex2rgb(base);
-  return tex(256, 256, (c, w, h) => {
+  return tex(384, 384, (c, w, h) => {
     c.fillStyle = base; c.fillRect(0, 0, w, h);
     for (let i = 0; i < 30; i++) {
       const yy = (i / 30) * h + (Math.random() - 0.5) * 6, a = (Math.random() - 0.5) * 40;
@@ -191,13 +195,19 @@ export function lights(scene) {
   sun.position.set(-9, 9, 3);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -13; sun.shadow.camera.right = 13;
-  sun.shadow.camera.top = 12; sun.shadow.camera.bottom = -13;
-  sun.shadow.camera.far = 45; sun.shadow.bias = -0.0004;
+  // tighter frustum → more shadow resolution concentrated on the room
+  sun.shadow.camera.left = -12; sun.shadow.camera.right = 12;
+  sun.shadow.camera.top = 12; sun.shadow.camera.bottom = -12;
+  sun.shadow.camera.far = 40; sun.shadow.camera.near = 0.5;
+  sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.035;
   scene.add(sun);
+  // a dim cool fill from the opposite side lifts the shadow side of everything
+  const fill = new THREE.DirectionalLight('#aebfe0', 0.32);
+  fill.position.set(8, 5, -4);
+  scene.add(fill);
   const amb = new THREE.AmbientLight('#b8c0d4', 0.4);
   scene.add(amb);
-  LIGHTS = { hemi, sun, amb };
+  LIGHTS = { hemi, sun, fill, amb };
 }
 
 let worldGroup = null;
@@ -227,6 +237,7 @@ export function buildWorld(scene, mapId = 'classroom') {
     LIGHTS.sun.intensity = A.sun; LIGHTS.sun.color.set(A.sunCol);
     LIGHTS.hemi.intensity = A.hemi;
     LIGHTS.amb.intensity = A.amb;
+    LIGHTS.fill.intensity = A.amb * 0.8;   // cool fill tracks the mood
   }
   if (night) {
     // a warm desk lamp at the teacher's post and a cold moon wash
@@ -238,10 +249,24 @@ export function buildWorld(scene, mapId = 'classroom') {
     add(moon);
   }
 
+  // soft contact-shadow decal so furniture visibly "sits" on the floor
+  const shadowTex = tex(64, 64, (c, w, h) => {
+    const g = c.createRadialGradient(w / 2, h / 2, 2, w / 2, h / 2, w / 2);
+    g.addColorStop(0, 'rgba(0,0,0,0.42)'); g.addColorStop(0.65, 'rgba(0,0,0,0.22)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+  });
+  const shadowMat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false, opacity: night ? 0.5 : 1 });
+  const contact = (x, z, rx, rz = rx) => {
+    const s = add(new THREE.Mesh(new THREE.PlaneGeometry(rx, rz), shadowMat));
+    s.rotation.x = -Math.PI / 2; s.position.set(x, 0.018, z); s.renderOrder = 1;
+  };
+
   // floor
   const floorMap = { classroom: plankTex(), lab: tileTex(), gym: courtTex(), library: carpetTex(), detention: plankTex(96, 14) }[mapId];
+  // hard floors get a faint polished sheen; carpet stays matte
+  const floorRough = mapId === 'library' ? 0.95 : mapId === 'lab' ? 0.5 : 0.62;
   const floor = add(new THREE.Mesh(new THREE.PlaneGeometry(ROOM.x * 2 + 1, ROOM.z * 2 + 1),
-    new THREE.MeshStandardMaterial({ map: floorMap, roughness: 0.8 })));
+    new THREE.MeshStandardMaterial({ map: floorMap, roughness: floorRough, metalness: 0.0, envMapIntensity: mapId === 'library' ? 0.3 : 0.7 })));
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
 
@@ -276,12 +301,18 @@ export function buildWorld(scene, mapId = 'classroom') {
   const ceil = add(new THREE.Mesh(new THREE.PlaneGeometry(ROOM.x * 2 + 1, ROOM.z * 2 + 1), mat(night ? '#262b38' : '#f2f0e8')));
   ceil.rotation.x = Math.PI / 2; ceil.position.y = H;
 
-  // glowing ceiling light panels (dim, greenish in detention)
+  // glowing ceiling light panels
   for (const px of [-ROOM.x * 0.45, ROOM.x * 0.45]) for (const pz of [-ROOM.z * 0.42, ROOM.z * 0.42]) {
     const panel = add(new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.06, 0.9), new THREE.MeshBasicMaterial({ color: A.panel })));
     panel.position.set(px, H - 0.05, pz);
     const rim = add(new THREE.Mesh(new THREE.BoxGeometry(2.14, 0.05, 1.04), mat('#9aa0aa')));
     rim.position.set(px, H - 0.02, pz);
+  }
+  // two soft overhead glows so the panels feel like they light the room
+  for (const pz of [-ROOM.z * 0.42, ROOM.z * 0.42]) {
+    const glow = new THREE.PointLight(A.panel, night ? 3 : 4.5, H + 4, 2);
+    glow.position.set(0, H - 0.6, pz);
+    add(glow);
   }
 
   // the exam board
@@ -531,7 +562,24 @@ export function buildWorld(scene, mapId = 'classroom') {
     : new THREE.MeshStandardMaterial({ map: woodGrainTex(PAL.deskTop), roughness: 0.48 });
   const leg = mat(PAL.leg, { roughness: 0.4, metalness: 0.35 });
   const edgeM = mat(PAL.leg, { roughness: 0.5, metalness: 0.25 });
+  const bottleCol = ['#7ab8e0', '#e08fb4', '#8fd0a0', '#e0c47a', '#a89ae0'];
+  // a printed exam sheet: ruled lines, red margin, header and a couple of marks
+  const paperTex = tex(280, 360, (c, w, h) => {
+    c.fillStyle = '#f7f2e2'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 500; i++) { c.fillStyle = `rgba(180,168,138,${Math.random() * 0.07})`; c.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
+    c.strokeStyle = '#cf9a94'; c.lineWidth = 2; c.beginPath(); c.moveTo(30, 0); c.lineTo(30, h); c.stroke();
+    c.fillStyle = '#6a2020'; c.font = 'bold 22px Georgia'; c.fillText('FINAL EXAM', 42, 34);
+    c.strokeStyle = 'rgba(90,110,150,0.32)'; c.lineWidth = 1.4;
+    for (let y = 54; y < h - 12; y += 22) { c.beginPath(); c.moveTo(36, y); c.lineTo(w - 14, y); c.stroke(); }
+    c.strokeStyle = 'rgba(35,35,55,0.55)'; c.lineWidth = 2.2;
+    for (let k = 0; k < 6; k++) {
+      const y = 70 + k * 40; c.beginPath(); c.moveTo(44, y);
+      c.bezierCurveTo(80, y - 7, 140, y + 5, 70 + Math.random() * 120, y - 1); c.stroke();
+    }
+  });
   DESKS.forEach((d, i) => {
+    contact(d.x, d.deskZ, 2.0, 1.3);          // grounding shadow under desk
+    contact(d.x, d.z + 0.15, 1.0, 1.0);       // and under the chair
     const top = add(new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.07, 1.0), wood));
     top.position.set(d.x, 1.07, d.deskZ); top.castShadow = top.receiveShadow = true;
     surfaces.push({ mesh: top, desk: i });
@@ -550,35 +598,58 @@ export function buildWorld(scene, mapId = 'classroom') {
       const sb = add(new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.78, 8), leg));
       sb.position.set(d.x + lx, 0.26, d.deskZ); sb.rotation.x = Math.PI / 2;
     }
-    const paper = add(new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.72), mat('#f4efdd', { roughness: 0.95 })));
-    paper.rotation.x = -Math.PI / 2; paper.rotation.z = 0.06;
-    paper.position.set(d.x + 0.15, 1.105, d.deskZ + 0.02);
+    // paper sits flat and clearly ABOVE the desktop, with polygon offset so it
+    // never z-fights / clips into the desk on any map
+    const paper = add(new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.72),
+      new THREE.MeshStandardMaterial({ map: paperTex, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })));
+    paper.rotation.x = -Math.PI / 2; paper.rotation.z = 0.02;
+    paper.position.set(d.x + 0.15, 1.13, d.deskZ + 0.02);
+    paper.renderOrder = 2;
     paperMeshes.push(paper);
-    const bottle = add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.075, 0.34, 14), mat('#5aa3d8', { roughness: 0.3 })));
-    bottle.position.set(d.x - 0.6, 1.27, d.deskZ - 0.25); bottle.castShadow = true;
+    // rounded water bottle: translucent body, shoulder, cap, and a label band
+    const bMat = new THREE.MeshStandardMaterial({ color: bottleCol[i % bottleCol.length], roughness: 0.14, metalness: 0.05, transparent: true, opacity: 0.9 });
+    const bottle = add(new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.072, 0.3, 20), bMat));
+    bottle.position.set(d.x - 0.6, 1.25, d.deskZ - 0.25); bottle.castShadow = true;
     bottleMeshes.push(bottle);
-    const cap = add(new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.07, 12), mat('#2d5b80', { roughness: 0.4 })));
-    cap.position.set(d.x - 0.6, 1.47, d.deskZ - 0.25);
+    const shoulder = add(new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.068, 0.07, 18), bMat));
+    shoulder.position.set(d.x - 0.6, 1.435, d.deskZ - 0.25);
+    const neck = add(new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.04, 12), bMat));
+    neck.position.set(d.x - 0.6, 1.485, d.deskZ - 0.25);
+    const cap = add(new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.05, 14), mat('#2d5b80', { roughness: 0.4 })));
+    cap.position.set(d.x - 0.6, 1.52, d.deskZ - 0.25);
+    const label = add(new THREE.Mesh(new THREE.CylinderGeometry(0.0735, 0.0735, 0.13, 20, 1, true), mat('#eef2ee', { roughness: 0.75, side: THREE.DoubleSide })));
+    label.position.set(d.x - 0.6, 1.235, d.deskZ - 0.25);
     if (mapId === 'lab') {
       const fl = add(new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 10),
         mat(['#5ac07a', '#c05a8a', '#d8b04e'][i % 3], { roughness: 0.25, transparent: true, opacity: 0.85 })));
       fl.position.set(d.x + 0.62, 1.2, d.deskZ - 0.3);
     } else if (mapId === 'library' && i % 2 === 0) {
       const bk = add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.22), mat(['#8a3a34', '#3a5a8a', '#3f7a4c'][i % 3], { roughness: 0.8 })));
-      bk.position.set(d.x + 0.6, 1.13, d.deskZ + 0.25); bk.rotation.y = 0.4;
+      bk.position.set(d.x + 0.6, 1.145, d.deskZ + 0.25); bk.rotation.y = 0.4; bk.castShadow = true;
     }
-    // chair
-    const seat = add(new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.07, 0.8), mat(PAL.chair, { roughness: 0.6 })));
-    seat.position.set(d.x, 0.62, d.z + 0.15); seat.castShadow = true;
-    const back = add(new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.75, 0.07), mat(PAL.chair, { roughness: 0.6 })));
-    back.position.set(d.x, 1.02, d.z + 0.5);
-    for (const [lx, lz] of [[-0.36, -0.3], [0.36, -0.3], [-0.36, 0.42], [0.36, 0.42]]) {
-      const l = add(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.6, 8), leg));
-      l.position.set(d.x + lx, 0.31, d.z + 0.15 + lz);
+    // contoured moulded-plastic chair on a tapered metal-tube frame
+    const cz = d.z + 0.15, cMat = mat(PAL.chair, { roughness: 0.5, metalness: 0.05 });
+    const seat = add(new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.055, 0.72, 2, 1, 2), cMat));
+    seat.position.set(d.x, 0.6, cz); seat.rotation.x = -0.04; seat.castShadow = true;
+    const seatLip = add(new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.8, 12), cMat));
+    seatLip.rotation.z = Math.PI / 2; seatLip.position.set(d.x, 0.585, cz - 0.35);
+    const back = add(new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.44, 0.05, 2, 1, 1), cMat));
+    back.position.set(d.x, 1.0, cz + 0.34); back.rotation.x = 0.14; back.castShadow = true;
+    const topBar = add(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.76, 12), cMat));
+    topBar.rotation.z = Math.PI / 2; topBar.position.set(d.x, 1.22, cz + 0.31);
+    const cLegM = mat(PAL.leg, { roughness: 0.32, metalness: 0.55 });
+    for (const [lx, lz, rz, rx] of [[-0.33, -0.29, -0.06, -0.05], [0.33, -0.29, 0.06, -0.05], [-0.33, 0.35, -0.06, 0.04], [0.33, 0.35, 0.06, 0.04]]) {
+      const l = add(new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.03, 0.6, 10), cLegM));
+      l.position.set(d.x + lx, 0.3, cz + lz); l.rotation.z = rz; l.rotation.x = rx; l.castShadow = true;
+    }
+    for (const lz of [-0.29, 0.35]) {   // stretcher rails low on the frame
+      const sb = add(new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.68, 8), cLegM));
+      sb.rotation.z = Math.PI / 2; sb.position.set(d.x, 0.11, cz + lz);
     }
   });
 
   // teacher's desk + phone
+  contact(TEACHER_DESK.x, TEACHER_DESK.z, 3.0, 1.5);
   const tdesk = add(new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.0, 1.1), mat('#7a5230', { roughness: 0.6 })));
   tdesk.position.set(TEACHER_DESK.x, 0.5, TEACHER_DESK.z);
   tdesk.castShadow = tdesk.receiveShadow = true;
@@ -589,6 +660,7 @@ export function buildWorld(scene, mapId = 'classroom') {
   handset.position.set(TEACHER_DESK.x + 0.8, 1.16, TEACHER_DESK.z);
 
   // shame stool
+  contact(STOOL.x, STOOL.z, 0.9, 0.9);
   const stoolTop = add(new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.06, 18), mat('#8a5a34', { roughness: 0.6 })));
   stoolTop.position.set(STOOL.x, 0.62, STOOL.z); stoolTop.castShadow = true;
   for (let i = 0; i < 3; i++) {

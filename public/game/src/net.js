@@ -1,7 +1,11 @@
-// One seam, three adapters — the game never knows which is live:
+// One seam, four adapters — the game never knows which is live:
 //   LocalNet    solo vs bots (host simulates bots through the same event pipe)
 //   BCNet       real multiplayer across tabs of one browser (BroadcastChannel)
-//   SupabaseNet online rooms with 4-letter codes (Supabase Realtime)
+//   MQTTNet     online rooms over the internet, ZERO setup — a free public
+//               MQTT-over-WebSocket broker relays events; no account, no keys
+//   SupabaseNet online rooms with 4-letter codes (Supabase Realtime), used
+//               when a project is configured (more robust/private than the
+//               shared public broker)
 // Contract: send() echoes to self synchronously, so every client (host included)
 // processes events through one code path. sendAs() lets the host speak for bots.
 
@@ -9,6 +13,12 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../env.js';
 
 export const makeId = () => Math.random().toString(36).slice(2, 10);
 export const onlineAvailable = () => !!(SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase);
+// Zero-config online works as long as the vendored MQTT client loaded; the
+// broker itself is a free shared public one, so no credentials are needed.
+export const p2pAvailable = () => !!window.mqtt;
+// Free public brokers (WSS, reachable from an https page). We namespace topics
+// so unrelated demos on the same broker never collide with our rooms.
+export const MQTT_BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://test.mosquitto.org:8081'];
 
 class BaseNet {
   constructor() { this.id = makeId(); this.handlers = []; this.rosterHandlers = []; this.roster = []; }
@@ -23,12 +33,16 @@ class BaseNet {
   }
   loopback(type, data, from = this.id) { const ev = { type, data, from, t: Date.now() }; this.emit(ev); return ev; }
   sendAs(fromId, type, data) { return this.loopback(type, data, fromId); }
+  // Update my own presence fields (e.g. color) and re-broadcast so the roster
+  // everyone sees reflects the change. Overridden per adapter.
+  setMe(_patch) {}
 }
 
 export class LocalNet extends BaseNet {
   async join(_code, me) { this.roster = [{ ...me, id: this.id, joinedAt: Date.now() }]; this.emitRoster(); }
   addBots(bots) { this.roster.push(...bots); this.emitRoster(); }
   send(type, data) { this.loopback(type, data); }
+  setMe(patch) { const m = this.roster.find(p => p.id === this.id); if (m) { Object.assign(m, patch); this.emitRoster(); } }
   leave() {}
 }
 
@@ -39,9 +53,11 @@ export class BCNet extends BaseNet {
     this.peers = new Map([[this.id, { ...this.me, seen: Infinity }]]);
     this.ch.onmessage = ({ data: m }) => {
       if (m.k === 'ping') {
-        const known = this.peers.has(m.who.id);
+        const prev = this.peers.get(m.who.id);
         this.peers.set(m.who.id, { ...m.who, seen: Date.now() });
-        if (!known) { this.refresh(); this.ping(); }
+        if (!prev) this.ping();   // greet the newcomer so it learns of us
+        // refresh when a peer is new OR changed a presence field (e.g. colour)
+        if (!prev || prev.color !== m.who.color || prev.name !== m.who.name || prev.role !== m.who.role) this.refresh();
       } else if (m.k === 'bye') { this.peers.delete(m.who); this.refresh(); }
       else this.emit(m.ev);
     };
@@ -58,6 +74,7 @@ export class BCNet extends BaseNet {
   ping() { this.ch.postMessage({ k: 'ping', who: this.me }); }
   refresh() { this.roster = [...this.peers.values()].map(({ seen, ...p }) => p); this.emitRoster(); }
   send(type, data) { const ev = this.loopback(type, data); this.ch.postMessage({ k: 'ev', ev }); }
+  setMe(patch) { Object.assign(this.me, patch); this.peers.set(this.id, { ...this.me, seen: Infinity }); this.ping(); this.refresh(); }
   leave() { clearInterval(this.pinger); try { this.ch.postMessage({ k: 'bye', who: this.id }); this.ch.close(); } catch { /* closing */ } }
 }
 
@@ -68,7 +85,7 @@ export class SupabaseNet extends BaseNet {
     this.chan = this.client.channel('exam:' + code, { config: { presence: { key: this.id }, broadcast: { self: false } } });
     this.chan.on('presence', { event: 'sync' }, () => {
       this.roster = Object.values(this.chan.presenceState()).map(m => m[0])
-        .map(({ id, name, role, skin, joinedAt }) => ({ id, name, role, skin, joinedAt }));
+        .map(({ id, name, role, color, code, skin, joinedAt }) => ({ id, name, role, color, code, skin, joinedAt }));
       this.emitRoster();
     });
     this.chan.on('broadcast', { event: 'e' }, ({ payload }) => this.emit(payload));
@@ -80,11 +97,81 @@ export class SupabaseNet extends BaseNet {
     });
   }
   send(type, data) { const ev = this.loopback(type, data); this.chan.send({ type: 'broadcast', event: 'e', payload: ev }); }
+  setMe(patch) { Object.assign(this.me, patch); try { this.chan.track(this.me); } catch { /* not ready */ } }
   leave() { try { this.chan.unsubscribe(); } catch { /* leaving */ } }
+}
+
+// Zero-setup internet play. Events fan out through a free public MQTT broker
+// over WebSocket (no account, no keys). Presence reuses BCNet's proven
+// ping/timeout scheme — each client heartbeats its identity on a presence
+// topic and peers that go quiet are dropped. Broadcast mirrors SupabaseNet:
+// send() loops back locally and publishes; the broker's echo of our own
+// message is ignored (matched by `from`).
+export class MQTTNet extends BaseNet {
+  async join(code, me, brokerIdx = 0) {
+    if (!window.mqtt) throw new Error('Online client failed to load');
+    this.me = { ...me, id: this.id, joinedAt: Date.now() };
+    this.peers = new Map([[this.id, { ...this.me, seen: Infinity }]]);
+    const base = 'exam25x/' + code;                 // namespaced so we never clash with other broker users
+    this.evTopic = base + '/e';
+    this.presTopic = base + '/p';
+    const url = MQTT_BROKERS[brokerIdx];
+    this.client = window.mqtt.connect(url, {
+      clientId: 'exam-' + this.id, clean: true, keepalive: 30,
+      reconnectPeriod: 3000, connectTimeout: 8000,
+    });
+    try {
+      await new Promise((res, rej) => {
+        const to = setTimeout(() => rej(new Error('timeout')), 9000);
+        this.client.once('connect', () => {
+          clearTimeout(to);
+          this.client.subscribe([this.evTopic, this.presTopic], { qos: 0 }, e => e ? rej(e) : res());
+        });
+        this.client.once('error', e => { clearTimeout(to); rej(e); });
+      });
+    } catch (e) {
+      try { this.client.end(true); } catch { /* closing */ }
+      // try the backup broker once before giving up
+      if (brokerIdx + 1 < MQTT_BROKERS.length) return this.join(code, me, brokerIdx + 1);
+      throw new Error('Could not reach the online room server');
+    }
+    this.client.on('message', (t, payload) => {
+      let m; try { m = JSON.parse(payload.toString()); } catch { return; }
+      if (t === this.evTopic) { if (m.from !== this.id) this.emit(m); }   // ignore our own echoed events (already looped back)
+      else if (t === this.presTopic) {
+        if (m.who && m.who.id === this.id) return;                        // ignore our own presence
+        if (m.k === 'ping') {
+          const prev = this.peers.get(m.who.id);
+          this.peers.set(m.who.id, { ...m.who, seen: Date.now() });
+          if (!prev) this.ping();                                         // greet a newcomer so it learns of us fast
+          if (!prev || prev.color !== m.who.color || prev.name !== m.who.name || prev.role !== m.who.role) this.refresh();
+        } else if (m.k === 'bye') { this.peers.delete(m.who); this.refresh(); }
+      }
+    });
+    this.ping();
+    this.pinger = setInterval(() => {
+      this.ping();
+      const cut = Date.now() - 7000; let ch = false;
+      for (const [id, p] of this.peers) if (p.seen < cut) { this.peers.delete(id); ch = true; }
+      if (ch) this.refresh();
+    }, 2200);
+    await new Promise(r => setTimeout(r, 450));
+    this.refresh();
+  }
+  ping() { this.pub(this.presTopic, { k: 'ping', who: this.me }); }
+  refresh() { this.roster = [...this.peers.values()].map(({ seen, ...p }) => p); this.emitRoster(); }
+  pub(topic, obj) { try { this.client.publish(topic, JSON.stringify(obj), { qos: 0 }); } catch { /* not connected */ } }
+  send(type, data) { const ev = this.loopback(type, data); this.pub(this.evTopic, ev); }
+  setMe(patch) { Object.assign(this.me, patch); this.peers.set(this.id, { ...this.me, seen: Infinity }); this.ping(); this.refresh(); }
+  leave() {
+    clearInterval(this.pinger);
+    try { this.pub(this.presTopic, { k: 'bye', who: this.id }); this.client.end(true); } catch { /* leaving */ }
+  }
 }
 
 export function makeNet(mode) {
   if (mode === 'online') return new SupabaseNet();
+  if (mode === 'p2p') return new MQTTNet();
   if (mode === 'bc') return new BCNet();
   return new LocalNet();
 }

@@ -1,0 +1,64 @@
+name: Desktop builds
+
+# Builds downloadable installers of THE EXAM for Windows (.exe), macOS (.dmg)
+# and Linux (.AppImage).
+#   - Run manually (Actions → Desktop builds → Run workflow) → grab artifacts.
+#   - Push a tag like v0.1.0 → installers are attached to a GitHub Release,
+#     giving players a permanent download link.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm install
+
+      - name: Bundle game into the shell
+        working-directory: desktop
+        run: node copy-game.js
+
+      - name: Build installers
+        working-directory: desktop
+        run: npx electron-builder --publish never
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: the-exam-${{ matrix.os }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
+            desktop/dist/*.AppImage
+          if-no-files-found: warn
+
+      - name: Attach to release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
+            desktop/dist/*.AppImage
