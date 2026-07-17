@@ -1167,16 +1167,24 @@ addEventListener('mousemove', e => {
   S.yaw -= e.movementX * s;
   S.pitch = Math.max(-1.35, Math.min(1.35, S.pitch - e.movementY * (0.0025 * sens / zoom)));
 });
-// drag fallback when pointer lock is unavailable
-let dragXY = null;
-addEventListener('pointerdown', e => { if (!S.locked && e.target === canvas) dragXY = [e.clientX, e.clientY]; });
+// drag fallback when pointer lock is unavailable (and the touch look-finger).
+// Tracked per pointerId so a second finger on the joystick can't hijack the
+// camera; dragDist separates a look-DRAG from a tap (tap = interact).
+let dragXY = null, lookPid = null, dragDist = 0;
+addEventListener('pointerdown', e => {
+  dragDist = 0;   // every new press starts clean, locked or not
+  if (!S.locked && e.target === canvas && lookPid === null) { lookPid = e.pointerId; dragXY = [e.clientX, e.clientY]; }
+});
 addEventListener('pointermove', e => {
-  if (S.locked || !dragXY) return;
+  if (S.locked || dragXY === null || e.pointerId !== lookPid) return;
+  dragDist += Math.abs(e.clientX - dragXY[0]) + Math.abs(e.clientY - dragXY[1]);
   S.yaw -= (e.clientX - dragXY[0]) * 0.005;
   S.pitch = Math.max(-1.35, Math.min(1.35, S.pitch - (e.clientY - dragXY[1]) * 0.004));
   dragXY = [e.clientX, e.clientY];
 });
-addEventListener('pointerup', () => (dragXY = null));
+const endLook = e => { if (e.pointerId === lookPid) { lookPid = null; dragXY = null; } };
+addEventListener('pointerup', endLook);
+addEventListener('pointercancel', endLook);
 
 addEventListener('keydown', e => {
   S.keys[e.code] = true;
@@ -1205,10 +1213,60 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyE' && S.prompt) S.prompt.run();
 });
 addEventListener('keyup', e => (S.keys[e.code] = false));
+
+// ---------------------------------------------------------------- touch controls
+// Phones/tablets get a floating left-thumb joystick (walk; push to the edge to
+// sprint) and a small button cluster for the keyboard-only actions. Desktop
+// never sees any of it.
+const IS_TOUCH = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+S.joy = { x: 0, y: 0, mag: 0 };
+{
+  const zone = $('joyZone'), base = $('joyBase'), nub = $('joyNub');
+  let pid = null, cx = 0, cy = 0;
+  const R = 44;   // max nub travel in px
+  zone.addEventListener('pointerdown', e => {
+    if (pid !== null) return;
+    pid = e.pointerId; cx = e.clientX; cy = e.clientY;
+    const zr = zone.getBoundingClientRect();
+    base.style.display = 'block';
+    base.style.left = (cx - zr.left - 54) + 'px'; base.style.top = (cy - zr.top - 54) + 'px';
+    try { zone.setPointerCapture(pid); } catch { /* finger already lifted */ }
+    e.preventDefault();
+  });
+  zone.addEventListener('pointermove', e => {
+    if (e.pointerId !== pid) return;
+    let dx = e.clientX - cx, dy = e.clientY - cy;
+    const d = Math.hypot(dx, dy) || 1, c = Math.min(d, R) / d;
+    dx *= c; dy *= c;
+    nub.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    S.joy.x = dx / R; S.joy.y = dy / R; S.joy.mag = Math.min(1, d / R);
+  });
+  const joyEnd = e => {
+    if (e.pointerId !== pid) return;
+    pid = null; S.joy.x = S.joy.y = S.joy.mag = 0;
+    base.style.display = 'none';
+    nub.style.transform = 'translate(-50%, -50%)';
+  };
+  zone.addEventListener('pointerup', joyEnd);
+  zone.addEventListener('pointercancel', joyEnd);
+
+  // action buttons mirror the keyboard shortcuts exactly
+  const bind = (id, fn) => { $(id).addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); fn(); }); };
+  bind('tBtnSeat', () => { if (S.phase === 'exam' && !isTeacher() && !S.expelled[S.myId] && mySeat() != null) toggleSeat(); });
+  bind('tBtnSheet', () => { if (S.phase === 'exam' && !isTeacher() && mySeat() != null) setSheet(!S.sheetOpen); });
+  bind('tBtnView', () => {
+    if (!['prep', 'inspect', 'exam'].includes(S.phase)) return;
+    S.tp = !S.tp;
+    const me = S.figures[S.myId]; if (me) me.setVisible(S.tp);
+    toast(S.tp ? '🎥 third person' : '🎥 first person');
+  });
+  bind('tBtnHelp', () => $('help').classList.toggle('hidden'));
+}
 addEventListener('pointerup', e => {
   // clicks act on the crosshair target when locked; when unlocked a plain
-  // click (no drag) does the same via the cursor ray
+  // click/tap (no drag) does the same — a look-DRAG must not fire it
   if (e.target !== canvas || modalOpen()) return;
+  if (dragDist > 12) return;
   if (S.prompt) S.prompt.run();
 });
 function act(type, extra = {}) {
@@ -1385,13 +1443,18 @@ function frame(nowMs) {
   // a smooth FOV kick, normalized diagonals, snappy accelerate/brake
   S.sprinting = false;
   if (S.net && canWalk() && !S.expelled[S.myId] && t > S.stun && t > S.stuck) {
-    const sprint = S.keys.ShiftLeft || S.keys.ShiftRight;
+    const sprint = S.keys.ShiftLeft || S.keys.ShiftRight || S.joy.mag > 0.92;   // joystick edge = sprint
     const sp = (isTeacher() ? 4.4 : 4.2) * (sprint ? 1.35 : 1);
     let ix = 0, iz = 0;
     if (S.keys.KeyW) { ix -= Math.sin(S.yaw); iz -= Math.cos(S.yaw); }
     if (S.keys.KeyS) { ix += Math.sin(S.yaw); iz += Math.cos(S.yaw); }
     if (S.keys.KeyA) { ix -= Math.cos(S.yaw); iz += Math.sin(S.yaw); }
     if (S.keys.KeyD) { ix += Math.cos(S.yaw); iz -= Math.sin(S.yaw); }
+    if (S.joy.mag > 0.12) {   // touch joystick: up = forward, right = strafe, camera-relative
+      const f = -S.joy.y, s = S.joy.x;
+      ix += -Math.sin(S.yaw) * f + Math.cos(S.yaw) * s;
+      iz += -Math.cos(S.yaw) * f - Math.sin(S.yaw) * s;
+    }
     const il = Math.hypot(ix, iz);
     S.sprinting = !!(il && sprint);
     const k = Math.min(1, dt * 20);
@@ -1513,6 +1576,9 @@ function frame(nowMs) {
     $('dutyLine').textContent = S.duty ? (S.duty.kind === 'phone' ? '📞 Answer the phone!' : '🖊 Write on the board!') : '';
   }
   if (room.clockHand) room.clockHand.rotation.z = -t * 0.35;
+
+  // touch controls only exist on touch devices, and only during a round
+  $('touchUI').style.display = IS_TOUCH && ['prep', 'inspect', 'exam'].includes(S.phase) ? '' : 'none';
 
   // tension chips: "out of seat" reminder + teacher-proximity warning
   const inDanger = !isTeacher() && S.phase === 'exam' && !S.expelled[S.myId] && mySeat() != null;

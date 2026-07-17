@@ -9,7 +9,7 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #14161f; }
   body { font-family: 'Segoe UI', system-ui, sans-serif; color: #f0ede4; user-select: none; -webkit-user-select: none; }
-  #c { position: fixed; inset: 0; display: block; }
+  #c { position: fixed; inset: 0; display: block; touch-action: none; }
   /* permanent cinematic vignette + a faint warm/cool grade over the 3D view */
   #vignette { position: fixed; inset: 0; z-index: 10; pointer-events: none;
     background:
@@ -96,6 +96,21 @@
     padding: 8px 11px; font-size: 13px; opacity: .5; filter: grayscale(.7); }
   .achRow.on { opacity: 1; filter: none; box-shadow: inset 0 0 0 1px rgba(224,182,78,.4); }
   .achIcon { font-size: 22px; }
+
+  /* touch controls */
+  #touchUI { position: fixed; inset: 0; z-index: 6; pointer-events: none; }
+  #joyZone { position: absolute; left: 0; bottom: 0; width: 46vw; height: 46vh;
+    pointer-events: auto; touch-action: none; }
+  #joyBase { position: absolute; width: 108px; height: 108px; border-radius: 50%; display: none;
+    background: rgba(255,255,255,.07); border: 2px solid rgba(255,255,255,.25); }
+  #joyNub { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; border-radius: 50%;
+    background: rgba(255,255,255,.4); transform: translate(-50%, -50%); }
+  #touchBtns { position: absolute; right: 10px; bottom: 16vh; display: flex; flex-direction: column;
+    gap: 10px; pointer-events: auto; }
+  .tBtn { width: 52px; height: 52px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.3);
+    background: rgba(23,27,38,.65); font-size: 22px; touch-action: none;
+    display: flex; align-items: center; justify-content: center; color: #fff; }
+  .tBtn:active { background: rgba(224,182,78,.5); }
 
   /* results */
   #resultsRows { margin: 14px 0; display: flex; flex-direction: column; gap: 5px; width: min(420px, 90vw); }
@@ -366,6 +381,17 @@
 <div class="hud hidden" id="helpTip">H — controls</div>
 <div class="hud" id="tnear">👁 TEACHER IS CLOSE</div>
 <div class="hud" id="oos">🪑 OUT OF SEAT — SPACE at your desk to sit</div>
+
+<!-- TOUCH CONTROLS (phones/tablets only) -->
+<div id="touchUI" style="display:none">
+  <div id="joyZone"><div id="joyBase"><div id="joyNub"></div></div></div>
+  <div id="touchBtns">
+    <button class="tBtn" id="tBtnSeat" title="leave / retake seat">🪑</button>
+    <button class="tBtn" id="tBtnSheet" title="show / hide paper">📝</button>
+    <button class="tBtn" id="tBtnView" title="camera view">🎥</button>
+    <button class="tBtn" id="tBtnHelp" title="help">❓</button>
+  </div>
+</div>
 
 <div class="hud hidden" id="sheet">
   <h3>📝 FINAL EXAM — <span id="sheetCountry"></span></h3>
